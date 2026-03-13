@@ -47,6 +47,14 @@ reminderkit add-subtask <parent> <child> [--list <name>]
 reminderkit test
 ```
 
+## Claude Code Skill
+
+Install the skill so Claude Code can use reminderkit automatically:
+
+```bash
+mkdir -p ~/.claude/skills/apple-reminders && curl -sL https://raw.githubusercontent.com/johnmatthewtennant/reminderkit-cli/master/.agents/skills/apple-reminders/SKILL.md -o ~/.claude/skills/apple-reminders/SKILL.md
+```
+
 ## Private API Notice
 
 This tool uses Apple's private `ReminderKit.framework`. It is not endorsed by Apple and may break with any macOS update. Use at your own risk.
