@@ -4,16 +4,23 @@ A command-line interface for Apple Reminders, built on the private ReminderKit f
 
 Supports full CRUD on reminders, lists, sections, subtasks, and tags — with JSON output for scripting.
 
+## Quickstart
+
+```bash
+brew install johnmatthewtennant/tap/reminderkit-cli
+mkdir -p ~/.agents/skills/apple-reminders && curl -sL https://raw.githubusercontent.com/johnmatthewtennant/reminderkit-cli/master/.agents/skills/apple-reminders/SKILL.md -o ~/.agents/skills/apple-reminders/SKILL.md && ln -sfn ~/.agents/skills/apple-reminders ~/.claude/skills/apple-reminders
+```
+
+Then in Claude Code:
+
+```
+/apple-reminders
+```
+
 ## Requirements
 
 - macOS (tested on macOS 15+)
 - Xcode Command Line Tools (`xcode-select --install`)
-
-## Install
-
-```bash
-brew install johnmatthewtennant/tap/reminderkit-cli
-```
 
 ### Build from source
 
@@ -22,8 +29,6 @@ git clone https://github.com/johnmatthewtennant/reminderkit-cli.git
 cd reminderkit-cli
 make
 ```
-
-This produces a `reminderkit` binary in the current directory. Move it to your PATH if desired.
 
 ## Usage
 
@@ -45,14 +50,6 @@ reminderkit rename-list <old-name> <new-name>
 reminderkit delete-list <name>
 reminderkit add-subtask <parent> <child> [--list <name>]
 reminderkit test
-```
-
-## Claude Code Skill
-
-Install the skill so Claude Code can use reminderkit automatically:
-
-```bash
-mkdir -p ~/.agents/skills/apple-reminders && curl -sL https://raw.githubusercontent.com/johnmatthewtennant/reminderkit-cli/master/.agents/skills/apple-reminders/SKILL.md -o ~/.agents/skills/apple-reminders/SKILL.md && ln -sfn ~/.agents/skills/apple-reminders ~/.claude/skills/apple-reminders
 ```
 
 ## Private API Notice
