@@ -7,8 +7,7 @@ Supports full CRUD on reminders, lists, sections, subtasks, and tags — with JS
 ## Quickstart
 
 ```bash
-brew install johnmatthewtennant/tap/reminderkit-cli
-mkdir -p ~/.agents/skills/apple-reminders && curl -sL https://raw.githubusercontent.com/johnmatthewtennant/reminderkit-cli/master/.agents/skills/apple-reminders/SKILL.md -o ~/.agents/skills/apple-reminders/SKILL.md && ln -sfn ~/.agents/skills/apple-reminders ~/.claude/skills/apple-reminders
+curl -sL https://raw.githubusercontent.com/johnmatthewtennant/reminderkit-cli/master/install.sh | bash
 ```
 
 Then in Claude Code:
