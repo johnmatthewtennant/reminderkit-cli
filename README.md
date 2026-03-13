@@ -52,7 +52,7 @@ reminderkit test
 Install the skill so Claude Code can use reminderkit automatically:
 
 ```bash
-mkdir -p ~/.claude/skills/apple-reminders && curl -sL https://raw.githubusercontent.com/johnmatthewtennant/reminderkit-cli/master/.agents/skills/apple-reminders/SKILL.md -o ~/.claude/skills/apple-reminders/SKILL.md
+mkdir -p ~/.agents/skills/apple-reminders && curl -sL https://raw.githubusercontent.com/johnmatthewtennant/reminderkit-cli/master/.agents/skills/apple-reminders/SKILL.md -o ~/.agents/skills/apple-reminders/SKILL.md && ln -sfn ~/.agents/skills/apple-reminders ~/.claude/skills/apple-reminders
 ```
 
 ## Private API Notice
