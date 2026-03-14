@@ -94,14 +94,12 @@ def generate_header():
 
 static Class REMStoreClass;
 static Class REMSaveRequestClass;
-static Class REMSubtaskCtxClass;
 static Class REMListSectionCIClass;
 
 static void loadFramework(void) {
     [[NSBundle bundleWithPath:@"/System/Library/PrivateFrameworks/ReminderKit.framework"] load];
     REMStoreClass = NSClassFromString(@"REMStore");
     REMSaveRequestClass = NSClassFromString(@"REMSaveRequest");
-    REMSubtaskCtxClass = NSClassFromString(@"REMReminderSubtaskContextChangeItem");
     REMListSectionCIClass = NSClassFromString(@"REMListSectionChangeItem");
 }
 
@@ -217,6 +215,19 @@ static id findReminder(id store, NSString *title, NSString *listName) {
         for (id rem in rems) {
             NSString *t = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("titleAsString"));
             if ([t isEqualToString:title]) return rem;
+        }
+    }
+    return nil;
+}
+
+static id findReminderByID(id store, NSString *idString) {
+    NSArray *lists = fetchLists(store);
+    for (id list in lists) {
+        NSArray *rems = fetchReminders(store, list, YES);
+        for (id rem in rems) {
+            id objID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));
+            NSString *idStr = objectIDToString(objID);
+            if (idStr && [idStr isEqualToString:idString]) return rem;
         }
     }
     return nil;
@@ -478,38 +489,6 @@ static int cmdDeleteList(id store, NSString *name) {
     return 0;
 }
 
-static int cmdAddSubtask(id store, NSString *parentTitle, NSString *childTitle, NSString *listName) {
-    id parentRem = findReminder(store, parentTitle, listName);
-    if (!parentRem) errorExit([NSString stringWithFormat:@"Parent not found: %@", parentTitle]);
-
-    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
-        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
-
-    id parentCI = ((id (*)(id, SEL, id))objc_msgSend)(
-        saveReq, sel_registerName("updateReminder:"), parentRem);
-
-    id subtaskCtx = ((id (*)(id, SEL))objc_msgSend)(parentCI, sel_registerName("subtaskContext"));
-    if (!subtaskCtx) {
-        subtaskCtx = ((id (*)(id, SEL, id))objc_msgSend)(
-            [REMSubtaskCtxClass alloc], sel_registerName("initWithReminderChangeItem:"), parentCI);
-    }
-
-    id newSub = ((id (*)(id, SEL, id, id))objc_msgSend)(
-        saveReq, sel_registerName("addReminderWithTitle:toReminderSubtaskContextChangeItem:"),
-        childTitle, subtaskCtx);
-    if (!newSub) errorExit(@"Failed to create subtask");
-
-    NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
-        saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
-    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
-
-    id created = findReminder(store, childTitle, listName);
-    if (created) printJSON(reminderToDict(created));
-    else fprintf(stderr, "Created (but could not re-fetch)\\n");
-    return 0;
-}
-
 static int cmdAddTag(id store, NSString *title, NSString *tagName, NSString *listName) {
     id rem = findReminder(store, title, listName);
     if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found: %@", title]);
@@ -636,8 +615,26 @@ def generate_update_command():
     """Generate the update command with all setter flags."""
     lines = [
         'static int cmdUpdate(id store, NSString *title, NSString *listName, NSDictionary *opts) {',
-        '    id rem = findReminder(store, title, listName);',
-        '    if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found: %@", title]);',
+        '    NSString *remID = opts[@"id"];',
+        '    id rem = nil;',
+        '    if (remID) {',
+        '        rem = findReminderByID(store, remID);',
+        '        if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", remID]);',
+        '    } else {',
+        '        rem = findReminder(store, title, listName);',
+        '        if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found: %@", title]);',
+        '    }',
+        '',
+        '    // Validate conflicting parent flags',
+        '    NSString *parentID = opts[@"parent-id"];',
+        '    NSString *parentTitle = opts[@"parent-title"];',
+        '    BOOL removeParent = opts[@"remove-parent"] != nil;',
+        '    if ((parentID || parentTitle) && removeParent) {',
+        '        errorExit(@"Cannot specify both --parent-id/--parent-title and --remove-parent");',
+        '    }',
+        '    if (parentID && parentTitle) {',
+        '        errorExit(@"Cannot specify both --parent-id and --parent-title");',
+        '    }',
         '',
         '    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(',
         '        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);',
@@ -680,6 +677,74 @@ def generate_update_command():
         lines.append(f'        ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("{method}"));')
         lines.append(f'    }}')
 
+    # Reparenting via --parent-id or --parent-title
+    lines.extend([
+        '',
+        '    // Reparent: --parent-id or --parent-title',
+        '    if (parentID || parentTitle) {',
+        '        id parentRem = nil;',
+        '        if (parentID) {',
+        '            parentRem = findReminderByID(store, parentID);',
+        '            if (!parentRem) errorExit([NSString stringWithFormat:@"Parent not found with id: %@", parentID]);',
+        '        } else {',
+        '            parentRem = findReminder(store, parentTitle, listName);',
+        '            if (!parentRem) errorExit([NSString stringWithFormat:@"Parent not found: %@", parentTitle]);',
+        '        }',
+        '',
+        '        // Validate no self-parenting',
+        '        id remObjID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));',
+        '        id parentObjID = ((id (*)(id, SEL))objc_msgSend)(parentRem, sel_registerName("objectID"));',
+        '        if ([objectIDToString(remObjID) isEqualToString:objectIDToString(parentObjID)]) {',
+        '            errorExit(@"Cannot set a reminder as its own parent");',
+        '        }',
+        '',
+        '        // Get the list for reparenting',
+        '        id remListID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("listID"));',
+        '        NSArray *allLists = fetchLists(store);',
+        '        id targetList = nil;',
+        '        for (id l in allLists) {',
+        '            id lID = ((id (*)(id, SEL))objc_msgSend)(l, sel_registerName("objectID"));',
+        '            if ([objectIDToString(lID) isEqualToString:objectIDToString(remListID)]) {',
+        '                targetList = l;',
+        '                break;',
+        '            }',
+        '        }',
+        '        if (!targetList) errorExit(@"Could not find list for reparenting");',
+        '',
+        '        id listCI = ((id (*)(id, SEL, id))objc_msgSend)(',
+        '            saveReq, sel_registerName("updateList:"), targetList);',
+        '',
+        '        id parentCI = ((id (*)(id, SEL, id))objc_msgSend)(',
+        '            saveReq, sel_registerName("updateReminder:"), parentRem);',
+        '',
+        '        ((void (*)(id, SEL, id, id))objc_msgSend)(',
+        '            listCI, sel_registerName("_reassignReminderChangeItem:withParentReminderChangeItem:"),',
+        '            changeItem, parentCI);',
+        '    }',
+    ])
+
+    # Move to different list via --to-list
+    lines.extend([
+        '',
+        '    // Move to different list: --to-list',
+        '    NSString *toListName = opts[@"to-list"];',
+        '    if (toListName) {',
+        '        id destList = findList(store, toListName);',
+        '        if (!destList) errorExit([NSString stringWithFormat:@"Destination list not found: %@", toListName]);',
+        '',
+        '        id destListCI = ((id (*)(id, SEL, id))objc_msgSend)(',
+        '            saveReq, sel_registerName("updateList:"), destList);',
+        '',
+        '        // Use initWithReminderChangeItem:insertIntoListChangeItem: to move',
+        '        Class REMReminderCIClass = NSClassFromString(@"REMReminderChangeItem");',
+        '        id moveCI = ((id (*)(id, SEL, id, id))objc_msgSend)(',
+        '            [REMReminderCIClass alloc],',
+        '            sel_registerName("initWithReminderChangeItem:insertIntoListChangeItem:"),',
+        '            changeItem, destListCI);',
+        '        if (!moveCI) errorExit(@"Failed to create move operation");',
+        '    }',
+    ])
+
     lines.extend([
         '',
         '    NSError *error = nil;',
@@ -688,7 +753,13 @@ def generate_update_command():
         '    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);',
         '',
         '    // Re-fetch and return updated state',
-        '    id updated = findReminder(store, opts[@"title"] ?: title, listName);',
+        '    id updated = nil;',
+        '    if (remID) {',
+        '        updated = findReminderByID(store, remID);',
+        '    } else {',
+        '        NSString *fetchList = opts[@"to-list"] ?: listName;',
+        '        updated = findReminder(store, opts[@"title"] ?: title, fetchList);',
+        '    }',
         '    if (updated) printJSON(reminderToDict(updated));',
         '    else fprintf(stderr, "Updated successfully\\n");',
         '    return 0;',
@@ -728,6 +799,148 @@ def generate_add_setters():
             lines.append(f'        ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("{setter}"), comps);')
             lines.append(f'    }}')
     return '\n'.join(lines)
+
+
+def generate_batch_command():
+    return '''
+static int cmdBatch(id store) {
+    // Read JSON from stdin (max 1MB)
+    NSFileHandle *input = [NSFileHandle fileHandleWithStandardInput];
+    NSData *inputData = [input readDataToEndOfFile];
+    if (inputData.length > 1024 * 1024) {
+        errorExit(@"Batch input exceeds 1MB limit");
+    }
+    if (inputData.length == 0) {
+        errorExit(@"No input provided on stdin");
+    }
+
+    NSError *parseError = nil;
+    id parsed = [NSJSONSerialization JSONObjectWithData:inputData options:0 error:&parseError];
+    if (parseError) errorExit([NSString stringWithFormat:@"Invalid JSON: %@", parseError]);
+    if (![parsed isKindOfClass:[NSArray class]]) errorExit(@"Expected JSON array");
+
+    NSArray *ops = (NSArray *)parsed;
+    NSSet *validOps = [NSSet setWithArray:@[@"add", @"complete", @"update", @"delete"]];
+    NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
+        @"notes", @"priority", @"flagged", @"completed",
+        @"due-date", @"start-date", @"remove-parent", @"remove-from-list",
+        @"parent-id", @"parent-title", @"to-list"]];
+
+    // Validate all operations first
+    for (NSUInteger i = 0; i < ops.count; i++) {
+        if (![ops[i] isKindOfClass:[NSDictionary class]]) {
+            errorExit([NSString stringWithFormat:@"Operation %lu is not an object", (unsigned long)i]);
+        }
+        NSDictionary *op = ops[i];
+        NSString *opType = op[@"op"];
+        if (!opType || ![validOps containsObject:opType]) {
+            errorExit([NSString stringWithFormat:@"Operation %lu has invalid op: %@", (unsigned long)i, opType ?: @"(missing)"]);
+        }
+        // Check for unknown keys
+        for (NSString *key in op) {
+            if (![validKeys containsObject:key]) {
+                errorExit([NSString stringWithFormat:@"Operation %lu has unknown key: %@", (unsigned long)i, key]);
+            }
+        }
+        // Require title or id for non-add ops
+        if (![opType isEqualToString:@"add"]) {
+            if (!op[@"title"] && !op[@"id"]) {
+                errorExit([NSString stringWithFormat:@"Operation %lu (%@) requires title or id", (unsigned long)i, opType]);
+            }
+            if (op[@"title"] && op[@"id"]) {
+                errorExit([NSString stringWithFormat:@"Operation %lu (%@) cannot have both title and id", (unsigned long)i, opType]);
+            }
+        } else {
+            if (!op[@"title"]) {
+                errorExit([NSString stringWithFormat:@"Operation %lu (add) requires title", (unsigned long)i]);
+            }
+        }
+    }
+
+    // Create single save request
+    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+
+    NSMutableArray *results = [NSMutableArray array];
+
+    for (NSDictionary *op in ops) {
+        NSString *opType = op[@"op"];
+        NSString *opTitle = op[@"title"];
+        NSString *opID = op[@"id"];
+        NSString *opList = op[@"list"];
+
+        if ([opType isEqualToString:@"add"]) {
+            id list = opList ? findList(store, opList) : [fetchLists(store) firstObject];
+            if (!list) errorExit(@"No list found for add operation");
+
+            id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                saveReq, sel_registerName("updateList:"), list);
+            id newRem = ((id (*)(id, SEL, id, id))objc_msgSend)(
+                saveReq, sel_registerName("addReminderWithTitle:toListChangeItem:"),
+                opTitle, listCI);
+            if (!newRem) errorExit([NSString stringWithFormat:@"Failed to create: %@", opTitle]);
+
+            // Apply optional properties on the new reminder change item
+            if (op[@"notes"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setNotesAsString:"), op[@"notes"]);
+            if (op[@"priority"]) ((void (*)(id, SEL, NSUInteger))objc_msgSend)(newRem, sel_registerName("setPriority:"), [op[@"priority"] integerValue]);
+            if (op[@"flagged"]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(newRem, sel_registerName("setFlagged:"), [op[@"flagged"] integerValue]);
+            if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
+            if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
+
+            [results addObject:@{@"op": @"add", @"title": opTitle, @"status": @"ok"}];
+
+        } else {
+            // Find the reminder
+            id rem = nil;
+            if (opID) {
+                rem = findReminderByID(store, opID);
+                if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", opID]);
+            } else {
+                rem = findReminder(store, opTitle, opList);
+                if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found: %@", opTitle]);
+            }
+
+            id remObjID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));
+            NSString *remIDStr = objectIDToString(remObjID);
+
+            id changeItem = ((id (*)(id, SEL, id))objc_msgSend)(
+                saveReq, sel_registerName("updateReminder:"), rem);
+
+            if ([opType isEqualToString:@"complete"]) {
+                ((void (*)(id, SEL, BOOL))objc_msgSend)(changeItem, sel_registerName("setCompleted:"), YES);
+                [results addObject:@{@"op": @"complete", @"id": remIDStr ?: @"", @"status": @"ok"}];
+
+            } else if ([opType isEqualToString:@"delete"]) {
+                ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));
+                [results addObject:@{@"op": @"delete", @"id": remIDStr ?: @"", @"status": @"ok"}];
+
+            } else if ([opType isEqualToString:@"update"]) {
+                if (op[@"title"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setTitleAsString:"), op[@"title"]);
+                if (op[@"notes"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setNotesAsString:"), op[@"notes"]);
+                if (op[@"priority"]) ((void (*)(id, SEL, NSUInteger))objc_msgSend)(changeItem, sel_registerName("setPriority:"), [op[@"priority"] integerValue]);
+                if (op[@"flagged"]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(changeItem, sel_registerName("setFlagged:"), [op[@"flagged"] integerValue]);
+                if (op[@"completed"]) {
+                    BOOL val = [op[@"completed"] isEqualToString:@"true"];
+                    ((void (*)(id, SEL, BOOL))objc_msgSend)(changeItem, sel_registerName("setCompleted:"), val);
+                }
+                if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
+                if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
+                if (op[@"remove-parent"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromParentReminder"));
+                if (op[@"remove-from-list"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));
+                [results addObject:@{@"op": @"update", @"id": remIDStr ?: @"", @"status": @"ok"}];
+            }
+        }
+    }
+
+    NSError *error = nil;
+    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+        saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    printJSON(results);
+    return 0;
+}
+'''
 
 
 def generate_test_command():
@@ -785,9 +998,12 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (notes=%s pri=%lu flagged=%ld)\\n", [notes UTF8String], (unsigned long)pri, (long)flagged); failed++; }
     }
 
-    // Test 7: cmdAddSubtask
-    fprintf(stderr, "Test 7: cmdAddSubtask...\\n");
-    { int r = cmdAddSubtask(store, parentTitle, childTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
+    // Test 7: Add child reminder then reparent via update --parent-title
+    fprintf(stderr, "Test 7: Add child + reparent via update --parent-title...\\n");
+    { int r = cmdAdd(store, childTitle, testListName, @{}); if (r==0) {
+        int r2 = cmdUpdate(store, childTitle, testListName, @{@"parent-title": parentTitle});
+        if (r2==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; }
+    } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
 
     // Test 8: cmdSubtasks (verify parent-child)
     fprintf(stderr, "Test 8: Verify parent-child...\\n");
@@ -821,7 +1037,7 @@ static int cmdTest(id store) {
 
     // Test 12: cmdComplete (complete child)
     fprintf(stderr, "Test 12: cmdComplete...\\n");
-    { int r = cmdComplete(store, childTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
+    { int r = cmdComplete(store, childTitle, testListName, nil); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
 
     // Test 13: cmdList (call actual command)
     fprintf(stderr, "Test 13: cmdList...\\n");
@@ -900,11 +1116,11 @@ static int cmdTest(id store) {
     // Cleanup
     // Test 20: cmdDelete child
     fprintf(stderr, "Test 20: cmdDelete child...\\n");
-    { int r = cmdDelete(store, childTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
+    { int r = cmdDelete(store, childTitle, testListName, nil); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
 
     // Test 21: cmdDelete parent
     fprintf(stderr, "Test 21: cmdDelete parent...\\n");
-    { int r = cmdDelete(store, parentTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
+    { int r = cmdDelete(store, parentTitle, testListName, nil); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
 
     // Test 22: cmdDeleteList
     fprintf(stderr, "Test 22: cmdDeleteList...\\n");
@@ -921,9 +1137,15 @@ static int cmdTest(id store) {
 
 def generate_delete_command():
     return '''
-static int cmdDelete(id store, NSString *title, NSString *listName) {
-    id rem = findReminder(store, title, listName);
-    if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found: %@", title]);
+static int cmdDelete(id store, NSString *title, NSString *listName, NSString *remID) {
+    id rem = nil;
+    if (remID) {
+        rem = findReminderByID(store, remID);
+        if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", remID]);
+    } else {
+        rem = findReminder(store, title, listName);
+        if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found: %@", title]);
+    }
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
@@ -938,7 +1160,8 @@ static int cmdDelete(id store, NSString *title, NSString *listName) {
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
-    printJSON(@{@"title": title, @"deleted": @YES});
+    NSString *displayTitle = title ?: @"(by id)";
+    printJSON(@{@"title": displayTitle, @"deleted": @YES});
     return 0;
 }
 '''
@@ -946,9 +1169,15 @@ static int cmdDelete(id store, NSString *title, NSString *listName) {
 
 def generate_complete_command():
     return '''
-static int cmdComplete(id store, NSString *title, NSString *listName) {
-    id rem = findReminder(store, title, listName);
-    if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found: %@", title]);
+static int cmdComplete(id store, NSString *title, NSString *listName, NSString *remID) {
+    id rem = nil;
+    if (remID) {
+        rem = findReminderByID(store, remID);
+        if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", remID]);
+    } else {
+        rem = findReminder(store, title, listName);
+        if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found: %@", title]);
+    }
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
@@ -963,7 +1192,8 @@ static int cmdComplete(id store, NSString *title, NSString *listName) {
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
-    printJSON(@{@"title": title, @"completed": @YES});
+    NSString *displayTitle = title ?: @"(by id)";
+    printJSON(@{@"title": displayTitle, @"completed": @YES});
     return 0;
 }
 '''
@@ -976,25 +1206,24 @@ def generate_usage():
     return f'''
 static void usage(void) {{
     fprintf(stderr, "Usage:\\n");
-    fprintf(stderr, "  reminders-cli lists\\n");
-    fprintf(stderr, "  reminders-cli list <name> [--include-completed]\\n");
-    fprintf(stderr, "  reminders-cli get <title> [--list <name>]\\n");
-    fprintf(stderr, "  reminders-cli subtasks <title> [--list <name>]\\n");
-    fprintf(stderr, "  reminders-cli add <title> [--list <name>] {write_flags}\\n");
-    fprintf(stderr, "  reminders-cli update <title> [--list <name>] {write_flags} {special_flags}\\n");
-    fprintf(stderr, "  reminders-cli complete <title> [--list <name>]\\n");
-    fprintf(stderr, "  reminders-cli delete <title> [--list <name>]\\n");
-    fprintf(stderr, "  reminders-cli add-tag <title> <tag-name> [--list <name>]\\n");
-    fprintf(stderr, "  reminders-cli remove-tag <title> <tag-name> [--list <name>]\\n");
-    fprintf(stderr, "  reminders-cli list-sections <list-name>\\n");
-    fprintf(stderr, "  reminders-cli create-section <list-name> <section-name>\\n");
-    fprintf(stderr, "  reminders-cli create-list <name>\\n");
-    fprintf(stderr, "  reminders-cli rename-list <old-name> <new-name>\\n");
-    fprintf(stderr, "  reminders-cli delete-list <name>\\n");
-    fprintf(stderr, "\\n  Composed (convenience):\\n");
-    fprintf(stderr, "  reminders-cli add-subtask <parent> <child> [--list <name>]\\n");
+    fprintf(stderr, "  reminderkit lists\\n");
+    fprintf(stderr, "  reminderkit list <name> [--include-completed]\\n");
+    fprintf(stderr, "  reminderkit get <title> [--list <name>]\\n");
+    fprintf(stderr, "  reminderkit subtasks <title> [--list <name>]\\n");
+    fprintf(stderr, "  reminderkit add <title> [--list <name>] {write_flags}\\n");
+    fprintf(stderr, "  reminderkit update (<title> | --id <id>) [--list <name>] {write_flags} {special_flags} [--parent-id <id>] [--parent-title <title>] [--to-list <name>]\\n");
+    fprintf(stderr, "  reminderkit complete (<title> | --id <id>) [--list <name>]\\n");
+    fprintf(stderr, "  reminderkit delete (<title> | --id <id>) [--list <name>]\\n");
+    fprintf(stderr, "  reminderkit add-tag <title> <tag-name> [--list <name>]\\n");
+    fprintf(stderr, "  reminderkit remove-tag <title> <tag-name> [--list <name>]\\n");
+    fprintf(stderr, "  reminderkit list-sections <list-name>\\n");
+    fprintf(stderr, "  reminderkit create-section <list-name> <section-name>\\n");
+    fprintf(stderr, "  reminderkit create-list <name>\\n");
+    fprintf(stderr, "  reminderkit rename-list <old-name> <new-name>\\n");
+    fprintf(stderr, "  reminderkit delete-list <name>\\n");
+    fprintf(stderr, "  reminderkit batch  (reads JSON array from stdin)\\n");
     fprintf(stderr, "\\n  Testing:\\n");
-    fprintf(stderr, "  reminders-cli test\\n");
+    fprintf(stderr, "  reminderkit test\\n");
 }}
 '''
 
@@ -1030,7 +1259,8 @@ int main(int argc, const char *argv[]) {
                 NSString *flag = [arg substringFromIndex:2];
                 if ([flag isEqualToString:@"include-completed"] ||
                     [flag isEqualToString:@"remove-parent"] ||
-                    [flag isEqualToString:@"remove-from-list"]) {
+                    [flag isEqualToString:@"remove-from-list"] ||
+                    [flag isEqualToString:@"help"]) {
                     if ([flag isEqualToString:@"include-completed"]) includeCompleted = YES;
                     opts[flag] = @"true";
                 } else if (i + 1 < argc) {
@@ -1063,21 +1293,23 @@ int main(int argc, const char *argv[]) {
             if (positional.count < 1) { fprintf(stderr, "Error: title required\\n"); usage(); return 1; }
             return cmdAdd(store, positional[0], listName, opts);
 
-        } else if ([command isEqualToString:@"add-subtask"]) {
-            if (positional.count < 2) { fprintf(stderr, "Error: parent and child titles required\\n"); usage(); return 1; }
-            return cmdAddSubtask(store, positional[0], positional[1], listName);
-
         } else if ([command isEqualToString:@"update"]) {
-            if (positional.count < 1) { fprintf(stderr, "Error: title required\\n"); usage(); return 1; }
-            return cmdUpdate(store, positional[0], listName, opts);
+            if (positional.count < 1 && !opts[@"id"]) { fprintf(stderr, "Error: title or --id required\\n"); usage(); return 1; }
+            if (positional.count > 0 && opts[@"id"]) { fprintf(stderr, "Error: cannot specify both title and --id\\n"); usage(); return 1; }
+            return cmdUpdate(store, positional.count > 0 ? positional[0] : nil, listName, opts);
 
         } else if ([command isEqualToString:@"complete"]) {
-            if (positional.count < 1) { fprintf(stderr, "Error: title required\\n"); usage(); return 1; }
-            return cmdComplete(store, positional[0], listName);
+            if (positional.count < 1 && !opts[@"id"]) { fprintf(stderr, "Error: title or --id required\\n"); usage(); return 1; }
+            if (positional.count > 0 && opts[@"id"]) { fprintf(stderr, "Error: cannot specify both title and --id\\n"); usage(); return 1; }
+            return cmdComplete(store, positional.count > 0 ? positional[0] : nil, listName, opts[@"id"]);
 
         } else if ([command isEqualToString:@"delete"]) {
-            if (positional.count < 1) { fprintf(stderr, "Error: title required\\n"); usage(); return 1; }
-            return cmdDelete(store, positional[0], listName);
+            if (positional.count < 1 && !opts[@"id"]) { fprintf(stderr, "Error: title or --id required\\n"); usage(); return 1; }
+            if (positional.count > 0 && opts[@"id"]) { fprintf(stderr, "Error: cannot specify both title and --id\\n"); usage(); return 1; }
+            return cmdDelete(store, positional.count > 0 ? positional[0] : nil, listName, opts[@"id"]);
+
+        } else if ([command isEqualToString:@"batch"]) {
+            return cmdBatch(store);
 
         } else if ([command isEqualToString:@"add-tag"]) {
             if (positional.count < 2) { fprintf(stderr, "Error: title and tag name required\\n"); usage(); return 1; }
@@ -1137,6 +1369,9 @@ def main():
     output.append(generate_complete_command())
     output.append('')
     output.append(generate_delete_command())
+    output.append('')
+    output.append('// --- Batch Command ---')
+    output.append(generate_batch_command())
     output.append('')
     output.append('// --- Tests ---')
     output.append(generate_test_command())
