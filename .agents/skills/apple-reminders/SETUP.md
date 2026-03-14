@@ -1,7 +1,13 @@
 # Apple Reminders Setup
 
+1. Install the CLI:
 ```bash
 brew install johnmatthewtennant/tap/reminderkit-cli
 ```
 
-On first run, macOS will prompt for Reminders access — grant it when the dialog appears.
+2. Grant Reminders access (triggers macOS permission prompt):
+```bash
+osascript -e 'tell application "Reminders" to get name of every list'
+```
+
+3. Verify: `reminderkit lists` should return JSON.
