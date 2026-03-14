@@ -5,7 +5,8 @@ CLI for Apple Reminders via the private ReminderKit framework. Supports subtasks
 ## Install
 
 ```bash
-brew install --with-skill johnmatthewtennant/tap/reminderkit-cli
+brew install johnmatthewtennant/tap/reminderkit-cli
+curl -sL https://raw.githubusercontent.com/johnmatthewtennant/reminderkit-cli/master/.agents/skills/apple-reminders/SKILL.md -o ~/.claude/skills/apple-reminders/SKILL.md --create-dirs
 ```
 
 ## Claude Code
