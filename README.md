@@ -4,22 +4,21 @@ A command-line interface for Apple Reminders, built on the private ReminderKit f
 
 Supports full CRUD on reminders, lists, sections, subtasks, and tags — with JSON output for scripting.
 
-## Quickstart
+## Install
 
 ```bash
-curl -sL https://raw.githubusercontent.com/johnmatthewtennant/reminderkit-cli/master/install.sh | bash
+brew install johnmatthewtennant/tap/reminderkit-cli
 ```
 
-Then in Claude Code:
+With Claude Code skill:
 
-```
-/apple-reminders
+```bash
+brew install --with-skill johnmatthewtennant/tap/reminderkit-cli
 ```
 
 ## Requirements
 
 - macOS (tested on macOS 15+)
-- Xcode Command Line Tools (`xcode-select --install`)
 
 ### Build from source
 
