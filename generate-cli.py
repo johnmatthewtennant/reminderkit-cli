@@ -1224,6 +1224,9 @@ static void usage(void) {{
     fprintf(stderr, "  reminderkit batch  (reads JSON array from stdin)\\n");
     fprintf(stderr, "\\n  Testing:\\n");
     fprintf(stderr, "  reminderkit test\\n");
+    fprintf(stderr, "\\n  Troubleshooting:\\n");
+    fprintf(stderr, "  If you get 'connection to service named com.apple.remindd' errors,\\n");
+    fprintf(stderr, "  grant Reminders access: osascript -e 'tell application \\"Reminders\\" to get name of every list'\\n");
 }}
 '''
 
