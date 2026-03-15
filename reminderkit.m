@@ -91,9 +91,9 @@ static NSArray *fetchLists(id store) {
         if ([desc containsString:@"remindd"] || [desc containsString:@"4097"]) {
             fprintf(stderr, "Error: Reminders access denied. Grant permission to your terminal app:\n");
             fprintf(stderr, "  osascript -e 'tell application \"Reminders\" to get name of every list'\n");
-            fprintf(stderr, "If previously denied, reset first:\n");
-            fprintf(stderr, "  tccutil reset Reminders com.apple.Terminal       # Terminal.app\n");
-            fprintf(stderr, "  tccutil reset Reminders com.googlecode.iterm2    # iTerm2\n");
+            fprintf(stderr, "If previously denied, reset and re-prompt:\n");
+            fprintf(stderr, "  tccutil reset Reminders com.apple.Terminal && osascript -e 'tell application \"Reminders\" to get name of every list'\n");
+            fprintf(stderr, "  tccutil reset Reminders com.googlecode.iterm2 && osascript -e 'tell application \"Reminders\" to get name of every list'\n");
             exit(1);
         }
         errorExit([NSString stringWithFormat:@"Failed to fetch lists: %@", error]);
@@ -1152,9 +1152,9 @@ static void usage(void) {
     fprintf(stderr, "     osascript -e 'tell application \"Reminders\" to get name of every list'\n");
     fprintf(stderr, "     Grant access when the macOS dialog appears.\n");
     fprintf(stderr, "\n");
-    fprintf(stderr, "  2. Previously denied? Reset permission for your terminal, then retry step 1:\n");
-    fprintf(stderr, "     tccutil reset Reminders com.apple.Terminal       # for Terminal.app\n");
-    fprintf(stderr, "     tccutil reset Reminders com.googlecode.iterm2    # for iTerm2\n");
+    fprintf(stderr, "  2. Previously denied? Reset and re-prompt:\n");
+    fprintf(stderr, "     tccutil reset Reminders com.apple.Terminal && osascript -e 'tell application \"Reminders\" to get name of every list'\n");
+    fprintf(stderr, "     tccutil reset Reminders com.googlecode.iterm2 && osascript -e 'tell application \"Reminders\" to get name of every list'\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  3. Still not working? Check System Settings > Privacy & Security > Reminders\n");
     fprintf(stderr, "     and ensure your terminal app is listed and enabled.\n");
