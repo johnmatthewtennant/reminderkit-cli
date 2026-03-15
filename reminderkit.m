@@ -87,7 +87,7 @@ static NSArray *fetchLists(id store) {
     NSArray *lists = ((id (*)(id, SEL, id*))objc_msgSend)(
         store, sel_registerName("fetchEligibleDefaultListsWithError:"), &error);
     if (error) {
-        NSString *desc = [error localizedDescription] ?: [error description];
+        NSString *desc = [error description];
         if ([desc containsString:@"remindd"] || [desc containsString:@"4097"]) {
             fprintf(stderr, "Error: Reminders access denied. Grant permission to your terminal app:\n");
             fprintf(stderr, "  osascript -e 'tell application \"Reminders\" to get name of every list'\n");
