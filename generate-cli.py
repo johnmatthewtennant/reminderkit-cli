@@ -171,7 +171,18 @@ static NSArray *fetchLists(id store) {
     NSError *error = nil;
     NSArray *lists = ((id (*)(id, SEL, id*))objc_msgSend)(
         store, sel_registerName("fetchEligibleDefaultListsWithError:"), &error);
-    if (error) errorExit([NSString stringWithFormat:@"Failed to fetch lists: %@", error]);
+    if (error) {
+        NSString *desc = [error localizedDescription] ?: [error description];
+        if ([desc containsString:@"remindd"] || [desc containsString:@"4097"]) {
+            fprintf(stderr, "Error: Reminders access denied. Grant permission to your terminal app:\\n");
+            fprintf(stderr, "  osascript -e 'tell application \\"Reminders\\" to get name of every list'\\n");
+            fprintf(stderr, "If previously denied, reset first:\\n");
+            fprintf(stderr, "  tccutil reset Reminders com.apple.Terminal       # Terminal.app\\n");
+            fprintf(stderr, "  tccutil reset Reminders com.googlecode.iterm2    # iTerm2\\n");
+            exit(1);
+        }
+        errorExit([NSString stringWithFormat:@"Failed to fetch lists: %@", error]);
+    }
     return lists;
 }
 
@@ -1225,8 +1236,18 @@ static void usage(void) {{
     fprintf(stderr, "\\n  Testing:\\n");
     fprintf(stderr, "  reminderkit test\\n");
     fprintf(stderr, "\\n  Troubleshooting:\\n");
-    fprintf(stderr, "  If you get 'connection to service named com.apple.remindd' errors,\\n");
-    fprintf(stderr, "  grant Reminders access: osascript -e 'tell application \\"Reminders\\" to get name of every list'\\n");
+    fprintf(stderr, "  If you get 'connection to service named com.apple.remindd' errors:\\n");
+    fprintf(stderr, "\\n");
+    fprintf(stderr, "  1. First time? Trigger the permission prompt:\\n");
+    fprintf(stderr, "     osascript -e 'tell application \\"Reminders\\" to get name of every list'\\n");
+    fprintf(stderr, "     Grant access when the macOS dialog appears.\\n");
+    fprintf(stderr, "\\n");
+    fprintf(stderr, "  2. Previously denied? Reset permission for your terminal, then retry step 1:\\n");
+    fprintf(stderr, "     tccutil reset Reminders com.apple.Terminal       # for Terminal.app\\n");
+    fprintf(stderr, "     tccutil reset Reminders com.googlecode.iterm2    # for iTerm2\\n");
+    fprintf(stderr, "\\n");
+    fprintf(stderr, "  3. Still not working? Check System Settings > Privacy & Security > Reminders\\n");
+    fprintf(stderr, "     and ensure your terminal app is listed and enabled.\\n");
 }}
 '''
 
