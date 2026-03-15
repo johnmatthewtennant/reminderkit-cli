@@ -178,10 +178,9 @@ static NSArray *fetchLists(id store) {
             fprintf(stderr, "1. Grant permission (triggers macOS prompt):\\n");
             fprintf(stderr, "   osascript -e 'tell application \\"Reminders\\" to get name of every list'\\n\\n");
             fprintf(stderr, "2. If previously denied, reset first, then re-run step 1:\\n");
-            fprintf(stderr, "   tccutil reset Reminders \\n");
-            fprintf(stderr, "   (use your terminal's bundle ID, e.g. com.apple.Terminal, com.googlecode.iterm2)\\n\\n");
-            fprintf(stderr, "   To find your terminal's bundle ID:\\n");
-            fprintf(stderr, "   osascript -e 'id of app \\"iTerm\\"'\\n\\n");
+            fprintf(stderr, "   tccutil reset Reminders <bundle-id>\\n\\n");
+            fprintf(stderr, "   Find your terminal's bundle ID:\\n");
+            fprintf(stderr, "   osascript -e 'id of app \\"iTerm\\"'  (replace iTerm with your terminal app name)\\n\\n");
             fprintf(stderr, "3. Then retry: reminderkit lists\\n");
             exit(1);
         }
