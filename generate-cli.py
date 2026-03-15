@@ -1235,19 +1235,6 @@ static void usage(void) {{
     fprintf(stderr, "  reminderkit batch  (reads JSON array from stdin)\\n");
     fprintf(stderr, "\\n  Testing:\\n");
     fprintf(stderr, "  reminderkit test\\n");
-    fprintf(stderr, "\\n  Troubleshooting:\\n");
-    fprintf(stderr, "  If you get 'connection to service named com.apple.remindd' errors:\\n");
-    fprintf(stderr, "\\n");
-    fprintf(stderr, "  1. First time? Trigger the permission prompt:\\n");
-    fprintf(stderr, "     osascript -e 'tell application \\"Reminders\\" to get name of every list'\\n");
-    fprintf(stderr, "     Grant access when the macOS dialog appears.\\n");
-    fprintf(stderr, "\\n");
-    fprintf(stderr, "  2. Previously denied? Reset and re-prompt:\\n");
-    fprintf(stderr, "     tccutil reset Reminders com.apple.Terminal && osascript -e 'tell application \\"Reminders\\" to get name of every list'\\n");
-    fprintf(stderr, "     tccutil reset Reminders com.googlecode.iterm2 && osascript -e 'tell application \\"Reminders\\" to get name of every list'\\n");
-    fprintf(stderr, "\\n");
-    fprintf(stderr, "  3. Still not working? Check System Settings > Privacy & Security > Reminders\\n");
-    fprintf(stderr, "     and ensure your terminal app is listed and enabled.\\n");
 }}
 '''
 
