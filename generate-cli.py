@@ -1356,6 +1356,10 @@ int main(int argc, const char *argv[]) {
         } else if ([command isEqualToString:@"test"]) {
             return cmdTest(store);
 
+        } else if ([command isEqualToString:@"help"] || [command isEqualToString:@"--help"] || [command isEqualToString:@"-h"]) {
+            usage();
+            return 0;
+
         } else {
             fprintf(stderr, "Unknown command: %s\\n", [command UTF8String]);
             usage();
