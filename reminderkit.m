@@ -265,6 +265,11 @@ static NSDictionary *reminderToDict(id rem) {
         if (val_timeZone) dict[@"timeZone"] = val_timeZone;
     } @catch (NSException *e) {}
 
+    @try {
+        NSURL *val_url = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("icsUrl"));
+        if (val_url) dict[@"url"] = [val_url absoluteString];
+    } @catch (NSException *e) {}
+
     return dict;
 }
 
@@ -388,6 +393,10 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
     if (opts[@"start-date"]) {
         NSDateComponents *comps = stringToDateComps(opts[@"start-date"]);
         ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setStartDateComponents:"), comps);
+    }
+    if (opts[@"url"]) {
+        NSURL *url = [NSURL URLWithString:opts[@"url"]];
+        if (url) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setIcsUrl:"), url);
     }
 
     NSError *error = nil;
@@ -639,6 +648,10 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
         NSDateComponents *comps = stringToDateComps(opts[@"start-date"]);
         ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setStartDateComponents:"), comps);
     }
+    if (opts[@"url"]) {
+        NSURL *url = [NSURL URLWithString:opts[@"url"]];
+        if (url) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setIcsUrl:"), url);
+    }
     if (opts[@"remove-parent"]) {
         ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromParentReminder"));
     }
@@ -780,7 +793,7 @@ static int cmdBatch(id store) {
     NSSet *validOps = [NSSet setWithArray:@[@"add", @"complete", @"update", @"delete"]];
     NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
         @"notes", @"priority", @"flagged", @"completed",
-        @"due-date", @"start-date", @"remove-parent", @"remove-from-list",
+        @"due-date", @"start-date", @"url", @"remove-parent", @"remove-from-list",
         @"parent-id", @"to-list"]];
 
     // Validate all operations first
@@ -840,6 +853,7 @@ static int cmdBatch(id store) {
             if (op[@"flagged"]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(newRem, sel_registerName("setFlagged:"), [op[@"flagged"] integerValue]);
             if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
             if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
+            if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setIcsUrl:"), u); }
 
             [results addObject:@{@"op": @"add", @"title": opTitle, @"status": @"ok"}];
 
@@ -873,6 +887,7 @@ static int cmdBatch(id store) {
                 }
                 if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
                 if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
+                if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setIcsUrl:"), u); }
                 if (op[@"remove-parent"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromParentReminder"));
                 if (op[@"remove-from-list"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));
                 [results addObject:@{@"op": @"update", @"id": remIDStr ?: @"", @"status": @"ok"}];
@@ -1204,8 +1219,8 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit list (<name> | --name <name>) [--include-completed]\n");
     fprintf(stderr, "  reminderkit get (<title> | --title <title>) [--list <name>]\n");
     fprintf(stderr, "  reminderkit subtasks (<title> | --title <title>) [--list <name>]\n");
-    fprintf(stderr, "  reminderkit add (<title> | --title <title>) [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>]\n");
-    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
+    fprintf(stderr, "  reminderkit add (<title> | --title <title>) [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>]\n");
+    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
     fprintf(stderr, "  reminderkit complete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> (<tag-name> | --tag <tag-name>)\n");

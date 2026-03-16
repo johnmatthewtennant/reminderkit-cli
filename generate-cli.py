@@ -60,6 +60,7 @@ REMINDER_READ_PROPS = {
     "completionDate":     ("completedAt",    "date"),
     "hashtags":           ("hashtags",       "set_hashtags"),
     "timeZone":           ("timeZone",       "string"),
+    "icsUrl":             ("url",            "url"),
 }
 
 # Setters to expose on REMReminderChangeItem (write via update command)
@@ -73,6 +74,7 @@ REMINDER_WRITE_OPS = {
     "flagged":      ("setFlagged:",             "int"),
     "due-date":     ("setDueDateComponents:",   "datecomps"),
     "start-date":   ("setStartDateComponents:", "datecomps"),
+    "url":          ("setIcsUrl:",              "url"),
 }
 
 # Special write operations (not simple setters)
