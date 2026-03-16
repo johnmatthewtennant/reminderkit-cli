@@ -266,8 +266,14 @@ static NSDictionary *reminderToDict(id rem) {
     } @catch (NSException *e) {}
 
     @try {
-        NSURL *val_url = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("icsUrl"));
-        if (val_url) dict[@"url"] = [val_url absoluteString];
+        id attCtx = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("attachmentContext"));
+        if (attCtx) {
+            NSArray *urlAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("urlAttachments"));
+            if (urlAtts.count > 0) {
+                NSURL *attUrl = ((id (*)(id, SEL))objc_msgSend)(urlAtts[0], sel_registerName("url"));
+                if (attUrl) dict[@"url"] = [attUrl absoluteString];
+            }
+        }
     } @catch (NSException *e) {}
 
     return dict;
@@ -396,7 +402,10 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
     }
     if (opts[@"url"]) {
         NSURL *url = [NSURL URLWithString:opts[@"url"]];
-        if (url) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setIcsUrl:"), url);
+        if (url) {
+            id attCtx = ((id (*)(id, SEL))objc_msgSend)(newRem, sel_registerName("attachmentContext"));
+            ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), url);
+        }
     }
 
     NSError *error = nil;
@@ -650,7 +659,10 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
     }
     if (opts[@"url"]) {
         NSURL *url = [NSURL URLWithString:opts[@"url"]];
-        if (url) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setIcsUrl:"), url);
+        if (url) {
+            id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext"));
+            ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), url);
+        }
     }
     if (opts[@"remove-parent"]) {
         ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromParentReminder"));
@@ -853,7 +865,7 @@ static int cmdBatch(id store) {
             if (op[@"flagged"]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(newRem, sel_registerName("setFlagged:"), [op[@"flagged"] integerValue]);
             if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
             if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
-            if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setIcsUrl:"), u); }
+            if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(newRem, sel_registerName("attachmentContext")); ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), u); } }
 
             [results addObject:@{@"op": @"add", @"title": opTitle, @"status": @"ok"}];
 
@@ -887,7 +899,7 @@ static int cmdBatch(id store) {
                 }
                 if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
                 if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
-                if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setIcsUrl:"), u); }
+                if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext")); ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), u); } }
                 if (op[@"remove-parent"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromParentReminder"));
                 if (op[@"remove-from-list"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));
                 [results addObject:@{@"op": @"update", @"id": remIDStr ?: @"", @"status": @"ok"}];
