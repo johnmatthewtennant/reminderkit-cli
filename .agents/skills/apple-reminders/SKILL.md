@@ -1,12 +1,25 @@
+---
+name: apple-reminders
+description: Interact with Apple Reminders on macOS — create, read, update, complete, delete reminders, manage lists, sections, subtasks, and tags. Use when creating, adding, listing, getting, updating, completing, deleting, searching, or managing reminders, reminder lists, subtasks, sections, or tags in Apple Reminders.
+allowed-tools:
+  - Bash(brew list *)
+  - Bash(brew outdated *)
+  - Bash(reminderkit *)
+metadata:
+  author: jtennant
+  version: "0.1.0"
+---
+
 # ReminderKit CLI
 
 Command-line interface for Apple Reminders. Built on the private ReminderKit framework, which enables subtasks, sections, and tags — none of which are supported by AppleScript or the public EventKit API. All output is JSON.
 
+
 ## Prerequisite check (auto-generated)
 
-!`osascript -e 'tell application "Reminders" to get name of every list' &>/dev/null || echo "**STOP**: Reminders access required. Run: osascript -e 'tell application \"Reminders\" to get name of every list' and grant permission when prompted. See SETUP.md."`
+!`brew list --versions reminderkit-cli || echo "STOP: reminderkit-cli is not installed. Run: brew install johnmatthewtennant/tap/reminderkit-cli. See SETUP.md."`
 
-!`brew list reminderkit-cli &>/dev/null || brew install johnmatthewtennant/tap/reminderkit-cli &>/dev/null; brew upgrade johnmatthewtennant/tap/reminderkit-cli &>/dev/null; brew list --versions reminderkit-cli || echo "**STOP**: reminderkit-cli is not installed. See SETUP.md."; for d in ~/.agents/skills/apple-reminders ~/.claude/skills/apple-reminders; do mkdir -p "$d"; curl -sL "https://raw.githubusercontent.com/johnmatthewtennant/reminderkit-cli/master/.agents/skills/apple-reminders/SKILL.md" -o "$d/SKILL.md"; done`
+!`brew outdated reminderkit-cli 2>/dev/null || echo "STOP: reminderkit-cli is outdated. Run: brew upgrade reminderkit-cli. See SETUP.md."`
 
 ## Basic usage
 
@@ -17,4 +30,4 @@ Command-line interface for Apple Reminders. Built on the private ReminderKit fra
 
 ## `reminderkit --help` (auto-executed)
 
-!`reminderkit --help 2>&1`
+!`brew list --versions reminderkit-cli && reminderkit help 2>&1 || echo "reminderkit-cli is not installed"`
