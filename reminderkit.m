@@ -634,7 +634,16 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
     if (opts[@"title"]) {
         ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setTitleAsString:"), opts[@"title"]);
     }
-    if (opts[@"notes"]) {
+    if (opts[@"append-notes"]) {
+        NSString *existing = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("notesAsString"));
+        NSString *combined;
+        if (existing && [existing length] > 0) {
+            combined = [NSString stringWithFormat:@"%@\n%@", existing, opts[@"append-notes"]];
+        } else {
+            combined = opts[@"append-notes"];
+        }
+        ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setNotesAsString:"), combined);
+    } else if (opts[@"notes"]) {
         ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setNotesAsString:"), opts[@"notes"]);
     }
     if (opts[@"completed"]) {
@@ -1232,7 +1241,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit get (<title> | --title <title>) [--list <name>]\n");
     fprintf(stderr, "  reminderkit subtasks (<title> | --title <title>) [--list <name>]\n");
     fprintf(stderr, "  reminderkit add (<title> | --title <title>) [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>]\n");
-    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
+    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
     fprintf(stderr, "  reminderkit complete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> (<tag-name> | --tag <tag-name>)\n");
