@@ -19,13 +19,13 @@ reminderkit install-skill
 
 ```
 reminderkit lists
-reminderkit list <name>
-reminderkit get <title> [--list <name>]
-reminderkit add <title> [--list <name>] [--notes <value>]
-reminderkit update <title> [--list <name>] [--title <value>] [--notes <value>] [--parent-title <title>] [--to-list <name>]
-reminderkit complete <title> [--list <name>]
-reminderkit delete <title> [--list <name>]
-reminderkit subtasks <title> [--list <name>]
+reminderkit list (<name> | --name <name>)
+reminderkit get (<title> | --title <title>) [--list <name>]
+reminderkit add (<title> | --title <title>) [--list <name>] [--notes <value>]
+reminderkit update (<title> | --title <title> | --id <id>) [--list <name>] [--notes <value>] [--parent-title <title>] [--to-list <name>]
+reminderkit complete (<title> | --title <title> | --id <id>) [--list <name>]
+reminderkit delete (<title> | --title <title> | --id <id>) [--list <name>]
+reminderkit subtasks (<title> | --title <title>) [--list <name>]
 reminderkit batch                          # JSON on stdin
 reminderkit --help                         # full usage
 ```
