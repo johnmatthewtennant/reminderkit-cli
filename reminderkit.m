@@ -1122,27 +1122,45 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (should be nil)\n"); failed++; }
     }
 
-    // Cleanup
-    // Test 20: cmdDelete child
-    fprintf(stderr, "Test 20: cmdDelete child...\n");
+    // Test 20: cmdUpdate --append-notes
+    fprintf(stderr, "Test 20: cmdUpdate --append-notes...\n");
     {
-        id rem20 = findReminder(store, childTitle, testListName);
+        id rem20 = findReminder(store, parentTitle, testListName);
         NSString *rem20ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem20, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem20ID);
+        int r = cmdUpdate(store, testListName, @{@"id": rem20ID, @"append-notes": @"Appended line"});
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 21: cmdDelete parent
-    fprintf(stderr, "Test 21: cmdDelete parent...\n");
+    // Test 21: Verify --append-notes
+    fprintf(stderr, "Test 21: Verify append-notes...\n");
     {
-        id rem21 = findReminder(store, parentTitle, testListName);
-        NSString *rem21ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem21, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem21ID);
+        id rem = findReminder(store, parentTitle, testListName);
+        NSString *notes = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("notesAsString"));
+        if ([notes isEqualToString:@"Updated\nAppended line"]) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL (notes=%s)\n", [notes UTF8String]); failed++; }
+    }
+
+    // Cleanup
+    // Test 22: cmdDelete child
+    fprintf(stderr, "Test 22: cmdDelete child...\n");
+    {
+        id rem22 = findReminder(store, childTitle, testListName);
+        NSString *rem22ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem22, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem22ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 22: cmdDeleteList
-    fprintf(stderr, "Test 22: cmdDeleteList...\n");
+    // Test 23: cmdDelete parent
+    fprintf(stderr, "Test 23: cmdDelete parent...\n");
+    {
+        id rem23 = findReminder(store, parentTitle, testListName);
+        NSString *rem23ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem23, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem23ID);
+        if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 24: cmdDeleteList
+    fprintf(stderr, "Test 24: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
