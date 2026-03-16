@@ -1,0 +1,59 @@
+name: Auto Release & Homebrew Bump
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get next version
+        id: version
+        run: |
+          LATEST=$(git tag -l 'v*' | sort -V | tail -1 | sed 's/v//')
+          if [ -z "$LATEST" ]; then
+            NEXT="0.1.0"
+          else
+            MAJOR=$(echo $LATEST | cut -d. -f1)
+            MINOR=$(echo $LATEST | cut -d. -f2)
+            PATCH=$(echo $LATEST | cut -d. -f3)
+            NEXT="$MAJOR.$MINOR.$((PATCH + 1))"
+          fi
+          echo "version=$NEXT" >> $GITHUB_OUTPUT
+          echo "tag=v$NEXT" >> $GITHUB_OUTPUT
+
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git tag ${{ steps.version.outputs.tag }}
+          git push origin ${{ steps.version.outputs.tag }}
+          gh release create ${{ steps.version.outputs.tag }} \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes
+
+      - name: Update Homebrew formula
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          TAG=${{ steps.version.outputs.tag }}
+          SHA=$(curl -sL "https://github.com/johnmatthewtennant/reminderkit-cli/archive/refs/tags/${TAG}.tar.gz" | shasum -a 256 | cut -d' ' -f1)
+
+          git clone https://x-access-token:${TAP_TOKEN}@github.com/johnmatthewtennant/homebrew-tap.git /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+
+          sed -i '' "s|url \".*\"|url \"https://github.com/johnmatthewtennant/reminderkit-cli/archive/refs/tags/${TAG}.tar.gz\"|" Formula/reminderkit-cli.rb
+          sed -i '' "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/reminderkit-cli.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/reminderkit-cli.rb
+          git commit -m "reminderkit-cli: bump to ${TAG}"
+          git push
