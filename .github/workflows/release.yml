@@ -7,6 +7,7 @@ on:
 jobs:
   release:
     runs-on: macos-latest
+    if: "!contains(github.event.head_commit.message, '[skip-release]')"
     permissions:
       contents: write
     steps:
@@ -14,7 +15,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check if already tagged
+        id: check
+        run: |
+          if git describe --exact-match HEAD 2>/dev/null; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Get next version
+        if: steps.check.outputs.skip != 'true'
         id: version
         run: |
           LATEST=$(git tag -l 'v*' | sort -V | tail -1 | sed 's/v//')
@@ -29,7 +40,12 @@ jobs:
           echo "version=$NEXT" >> $GITHUB_OUTPUT
           echo "tag=v$NEXT" >> $GITHUB_OUTPUT
 
+      - name: Build binary
+        if: steps.check.outputs.skip != 'true'
+        run: make
+
       - name: Create tag and release
+        if: steps.check.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -39,12 +55,35 @@ jobs:
             --title "${{ steps.version.outputs.tag }}" \
             --generate-notes
 
+      - name: Upload binary to release
+        if: steps.check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ steps.version.outputs.tag }} reminderkit
+
       - name: Update Homebrew formula
+        if: steps.check.outputs.skip != 'true'
         env:
           TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
         run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::error::TAP_TOKEN secret is not set. Cannot update Homebrew formula."
+            exit 1
+          fi
+
           TAG=${{ steps.version.outputs.tag }}
-          SHA=$(curl -sL "https://github.com/johnmatthewtennant/reminderkit-cli/archive/refs/tags/${TAG}.tar.gz" | shasum -a 256 | cut -d' ' -f1)
+
+          # Wait for tarball to be available
+          for i in 1 2 3 4 5; do
+            HTTP_CODE=$(curl -sL -o /tmp/release.tar.gz -w '%{http_code}' \
+              "https://github.com/johnmatthewtennant/reminderkit-cli/archive/refs/tags/${TAG}.tar.gz")
+            if [ "$HTTP_CODE" = "200" ]; then break; fi
+            echo "Tarball not ready (HTTP $HTTP_CODE), retrying in 5s..."
+            sleep 5
+          done
+
+          SHA=$(shasum -a 256 /tmp/release.tar.gz | cut -d' ' -f1)
 
           git clone https://x-access-token:${TAP_TOKEN}@github.com/johnmatthewtennant/homebrew-tap.git /tmp/homebrew-tap
           cd /tmp/homebrew-tap
