@@ -4,6 +4,7 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#include <mach-o/dyld.h>
 
 // --- Framework Loading ---
 
@@ -1126,6 +1127,85 @@ static int cmdTest(id store) {
 }
 
 
+// --- Install Skill ---
+
+static int cmdInstallSkill(void) {
+    // Get path of currently running binary
+    char execPath[PATH_MAX];
+    uint32_t size = sizeof(execPath);
+    if (_NSGetExecutablePath(execPath, &size) != 0) {
+        fprintf(stderr, "Error: could not determine executable path\n");
+        return 1;
+    }
+
+    // Resolve symlinks to get the real path
+    char realPath[PATH_MAX];
+    if (!realpath(execPath, realPath)) {
+        fprintf(stderr, "Error: could not resolve executable path\n");
+        return 1;
+    }
+
+    NSString *binaryPath = [NSString stringWithUTF8String:realPath];
+    NSString *binDir = [binaryPath stringByDeletingLastPathComponent];
+
+    // Try to find SKILL.md relative to the binary
+    // Homebrew: /opt/homebrew/Cellar/reminderkit-cli/X.Y.Z/bin/reminderkit
+    //   skill: /opt/homebrew/Cellar/reminderkit-cli/X.Y.Z/.agents/skills/apple-reminders/SKILL.md
+    // Build dir: ./reminderkit  ->  ./.agents/skills/apple-reminders/SKILL.md
+    NSArray *candidates = @[
+        [[binDir stringByDeletingLastPathComponent] stringByAppendingPathComponent:@".agents/skills/apple-reminders/SKILL.md"],
+        [[binDir stringByAppendingPathComponent:@".."] stringByAppendingPathComponent:@".agents/skills/apple-reminders/SKILL.md"],
+        [binDir stringByAppendingPathComponent:@".agents/skills/apple-reminders/SKILL.md"],
+    ];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *sourcePath = nil;
+    for (NSString *candidate in candidates) {
+        NSString *resolved = [candidate stringByStandardizingPath];
+        if ([fm fileExistsAtPath:resolved]) {
+            sourcePath = resolved;
+            break;
+        }
+    }
+
+    if (!sourcePath) {
+        fprintf(stderr, "Error: could not find SKILL.md relative to binary at %s\n", realPath);
+        fprintf(stderr, "Searched:\n");
+        for (NSString *candidate in candidates) {
+            fprintf(stderr, "  %s\n", [[candidate stringByStandardizingPath] UTF8String]);
+        }
+        return 1;
+    }
+
+    // Create target directory
+    NSString *home = NSHomeDirectory();
+    NSString *targetDir = [home stringByAppendingPathComponent:@".claude/skills/apple-reminders"];
+    NSString *targetPath = [targetDir stringByAppendingPathComponent:@"SKILL.md"];
+
+    NSError *error = nil;
+    if (![fm createDirectoryAtPath:targetDir withIntermediateDirectories:YES attributes:nil error:&error]) {
+        fprintf(stderr, "Error: could not create directory %s: %s\n",
+            [targetDir UTF8String], [[error localizedDescription] UTF8String]);
+        return 1;
+    }
+
+    // Remove existing symlink or file
+    if ([fm fileExistsAtPath:targetPath]) {
+        [fm removeItemAtPath:targetPath error:nil];
+    }
+
+    // Create symlink
+    if (![fm createSymbolicLinkAtPath:targetPath withDestinationPath:sourcePath error:&error]) {
+        fprintf(stderr, "Error: could not create symlink: %s\n",
+            [[error localizedDescription] UTF8String]);
+        return 1;
+    }
+
+    printf("Installed skill: %s -> %s\n", [targetPath UTF8String], [sourcePath UTF8String]);
+    return 0;
+}
+
+
 // --- Usage ---
 
 static void usage(void) {
@@ -1146,6 +1226,8 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit rename-list <old-name> <new-name>\n");
     fprintf(stderr, "  reminderkit delete-list <name>\n");
     fprintf(stderr, "  reminderkit batch  (reads JSON array from stdin)\n");
+    fprintf(stderr, "\n  Skill management:\n");
+    fprintf(stderr, "  reminderkit install-skill\n");
     fprintf(stderr, "\n  Testing:\n");
     fprintf(stderr, "  reminderkit test\n");
 }
@@ -1251,6 +1333,9 @@ int main(int argc, const char *argv[]) {
         } else if ([command isEqualToString:@"delete-list"]) {
             if (positional.count < 1) { fprintf(stderr, "Error: list name required\n"); usage(); return 1; }
             return cmdDeleteList(store, positional[0]);
+
+        } else if ([command isEqualToString:@"install-skill"]) {
+            return cmdInstallSkill();
 
         } else if ([command isEqualToString:@"test"]) {
             return cmdTest(store);
