@@ -1173,7 +1173,7 @@ static int cmdTest(id store) {
 
 // --- Install Skill ---
 
-static int cmdInstallSkill(void) {
+static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
     // Get path of currently running binary
     char execPath[PATH_MAX];
     uint32_t size = sizeof(execPath);
@@ -1233,32 +1233,38 @@ static int cmdInstallSkill(void) {
         return 1;
     }
 
-    // Install to both skill directories, skipping if already present
-    NSArray *targetDirs = @[
-        [home stringByAppendingPathComponent:@".claude/skills/apple-reminders"],
-        [home stringByAppendingPathComponent:@".agents/skills/apple-reminders"],
-    ];
+    // Install to selected skill directories
+    NSMutableArray *targetDirs = [NSMutableArray array];
+    if (installClaude) [targetDirs addObject:[home stringByAppendingPathComponent:@".claude/skills/apple-reminders"]];
+    if (installAgents) [targetDirs addObject:[home stringByAppendingPathComponent:@".agents/skills/apple-reminders"]];
 
+    int failures = 0;
     for (NSString *dir in targetDirs) {
         NSString *path = [dir stringByAppendingPathComponent:@"SKILL.md"];
         if ([fm fileExistsAtPath:path]) {
-            printf("Skipped: %s (already exists)\n", [path UTF8String]);
-            continue;
+            if (!force) {
+                fprintf(stderr, "Error: %s already exists (use --force to overwrite)\n", [path UTF8String]);
+                failures++;
+                continue;
+            }
+            [fm removeItemAtPath:path error:nil];
         }
         if (![fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:&error]) {
             fprintf(stderr, "Error: could not create directory %s: %s\n",
                 [dir UTF8String], [[error localizedDescription] UTF8String]);
+            failures++;
             continue;
         }
         if (![fm createSymbolicLinkAtPath:path withDestinationPath:sourcePath error:&error]) {
             fprintf(stderr, "Error: could not create symlink: %s\n",
                 [[error localizedDescription] UTF8String]);
+            failures++;
             continue;
         }
         printf("Installed skill: %s -> %s\n", [path UTF8String], [sourcePath UTF8String]);
     }
 
-    return 0;
+    return failures > 0 ? 1 : 0;
 }
 
 
@@ -1283,7 +1289,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit delete-list --name <name>\n");
     fprintf(stderr, "  reminderkit batch  (reads JSON array from stdin)\n");
     fprintf(stderr, "\n  Skill management:\n");
-    fprintf(stderr, "  reminderkit install-skill\n");
+    fprintf(stderr, "  reminderkit install-skill [--claude] [--agents] [--force]\n");
     fprintf(stderr, "\n  Testing:\n");
     fprintf(stderr, "  reminderkit test\n");
 }
@@ -1311,7 +1317,10 @@ int main(int argc, const char *argv[]) {
                 if ([flag isEqualToString:@"include-completed"] ||
                     [flag isEqualToString:@"remove-parent"] ||
                     [flag isEqualToString:@"remove-from-list"] ||
-                    [flag isEqualToString:@"help"]) {
+                    [flag isEqualToString:@"help"] ||
+                    [flag isEqualToString:@"claude"] ||
+                    [flag isEqualToString:@"agents"] ||
+                    [flag isEqualToString:@"force"]) {
                     if ([flag isEqualToString:@"include-completed"]) includeCompleted = YES;
                     opts[flag] = @"true";
                 } else if (i + 1 < argc) {
@@ -1413,7 +1422,12 @@ int main(int argc, const char *argv[]) {
             return cmdDeleteList(store, kwName);
 
         } else if ([command isEqualToString:@"install-skill"]) {
-            return cmdInstallSkill();
+            BOOL wantClaude = [opts[@"claude"] isEqualToString:@"true"];
+            BOOL wantAgents = [opts[@"agents"] isEqualToString:@"true"];
+            BOOL force = [opts[@"force"] isEqualToString:@"true"];
+            // Default: install to both
+            if (!wantClaude && !wantAgents) { wantClaude = YES; wantAgents = YES; }
+            return cmdInstallSkill(wantClaude, wantAgents, force);
 
         } else if ([command isEqualToString:@"test"]) {
             return cmdTest(store);
