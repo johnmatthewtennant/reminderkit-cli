@@ -72,6 +72,13 @@ static NSDateComponents *stringToDateComps(NSString *str) {
     return comps;
 }
 
+static NSString *normalizeQuotes(NSString *str) {
+    if (!str) return nil;
+    NSString *result = [str stringByReplacingOccurrencesOfString:@"\u2018" withString:@"'"];
+    result = [result stringByReplacingOccurrencesOfString:@"\u2019" withString:@"'"];
+    return result;
+}
+
 static void printJSON(id obj) {
     NSError *error = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
@@ -106,10 +113,18 @@ static NSArray *fetchLists(id store) {
 
 static id findList(id store, NSString *name) {
     NSArray *lists = fetchLists(store);
+    // Pass 1: exact match
     for (id list in lists) {
         id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
         NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
         if ([listName isEqualToString:name]) return list;
+    }
+    // Pass 2: normalized fallback (curly apostrophes -> straight)
+    NSString *normalizedName = normalizeQuotes(name);
+    for (id list in lists) {
+        id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+        NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
+        if ([normalizeQuotes(listName) isEqualToString:normalizedName]) return list;
     }
     return nil;
 }
@@ -139,11 +154,21 @@ static id findReminder(id store, NSString *title, NSString *listName) {
     } else {
         lists = fetchLists(store);
     }
+    // Pass 1: exact match
     for (id list in lists) {
         NSArray *rems = fetchReminders(store, list, YES);
         for (id rem in rems) {
             NSString *t = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("titleAsString"));
             if ([t isEqualToString:title]) return rem;
+        }
+    }
+    // Pass 2: normalized fallback (curly apostrophes -> straight)
+    NSString *normalizedTitle = normalizeQuotes(title);
+    for (id list in lists) {
+        NSArray *rems = fetchReminders(store, list, YES);
+        for (id rem in rems) {
+            NSString *t = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("titleAsString"));
+            if ([normalizeQuotes(t) isEqualToString:normalizedTitle]) return rem;
         }
     }
     return nil;
@@ -1234,27 +1259,110 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
     }
 
+    // Test 23: findReminder normalized fallback (curly apostrophe)
+    fprintf(stderr, "Test 23: findReminder normalized fallback...\n");
+    {
+        NSString *curlyTitle = @"Test\u2019s curly apostrophe";
+        NSString *straightTitle = @"Test's curly apostrophe";
+        int r = cmdAdd(store, curlyTitle, testListName, @{});
+        if (r == 0) {
+            id found = findReminder(store, straightTitle, testListName);
+            if (found) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (not found via normalized match)\n"); failed++; }
+            id rem23c = findReminder(store, curlyTitle, testListName);
+            if (rem23c) {
+                NSString *rem23cID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem23c, sel_registerName("objectID")));
+                cmdDelete(store, testListName, rem23cID);
+            }
+        } else { fprintf(stderr, "  FAIL (could not create reminder)\n"); failed++; }
+    }
+
+    // Test 24: findList normalized fallback (curly apostrophe)
+    fprintf(stderr, "Test 24: findList normalized fallback...\n");
+    {
+        NSString *curlyListName24 = @"__test_list\u2019s__";
+        NSString *straightListName24 = @"__test_list's__";
+        int r = cmdCreateList(store, curlyListName24);
+        if (r == 0) {
+            id found = findList(store, straightListName24);
+            if (found) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (not found via normalized match)\n"); failed++; }
+            cmdDeleteList(store, curlyListName24);
+        } else { fprintf(stderr, "  FAIL (could not create list)\n"); failed++; }
+    }
+
+    // Test 25: exact match takes priority -- reminder collision
+    fprintf(stderr, "Test 25: Exact match priority (reminder)...\n");
+    {
+        NSString *straightTitle25 = @"Bob's reminder";
+        NSString *curlyTitle25 = @"Bob\u2019s reminder";
+        int r1 = cmdAdd(store, straightTitle25, testListName, @{@"notes": @"straight"});
+        int r2 = cmdAdd(store, curlyTitle25, testListName, @{@"notes": @"curly"});
+        if (r1 == 0 && r2 == 0) {
+            id foundStraight = findReminder(store, straightTitle25, testListName);
+            NSString *notesStraight = foundStraight ? ((id (*)(id, SEL))objc_msgSend)(foundStraight, sel_registerName("notesAsString")) : nil;
+            id foundCurly = findReminder(store, curlyTitle25, testListName);
+            NSString *notesCurly = foundCurly ? ((id (*)(id, SEL))objc_msgSend)(foundCurly, sel_registerName("notesAsString")) : nil;
+            if ([notesStraight isEqualToString:@"straight"] && [notesCurly isEqualToString:@"curly"]) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else {
+                fprintf(stderr, "  FAIL (straight notes=%s, curly notes=%s)\n",
+                    [notesStraight UTF8String], [notesCurly UTF8String]); failed++;
+            }
+        } else { fprintf(stderr, "  FAIL (could not create reminders)\n"); failed++; }
+        id rem25a = findReminder(store, straightTitle25, testListName);
+        if (rem25a) { NSString *id25a = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem25a, sel_registerName("objectID"))); cmdDelete(store, testListName, id25a); }
+        id rem25b = findReminder(store, curlyTitle25, testListName);
+        if (rem25b) { NSString *id25b = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem25b, sel_registerName("objectID"))); cmdDelete(store, testListName, id25b); }
+    }
+
+    // Test 26: exact match takes priority -- list collision
+    fprintf(stderr, "Test 26: Exact match priority (list)...\n");
+    {
+        NSString *straightListName26 = @"__test Bob's List__";
+        NSString *curlyListName26 = @"__test Bob\u2019s List__";
+        int r1 = cmdCreateList(store, straightListName26);
+        int r2 = cmdCreateList(store, curlyListName26);
+        if (r1 == 0 && r2 == 0) {
+            id foundStraight = findList(store, straightListName26);
+            id foundCurly = findList(store, curlyListName26);
+            if (foundStraight && foundCurly) {
+                id straightStorage = ((id (*)(id, SEL))objc_msgSend)(foundStraight, sel_registerName("storage"));
+                NSString *straightName = ((id (*)(id, SEL))objc_msgSend)(straightStorage, sel_registerName("name"));
+                id curlyStorage = ((id (*)(id, SEL))objc_msgSend)(foundCurly, sel_registerName("storage"));
+                NSString *curlyName = ((id (*)(id, SEL))objc_msgSend)(curlyStorage, sel_registerName("name"));
+                if ([straightName isEqualToString:straightListName26] && [curlyName isEqualToString:curlyListName26]) {
+                    fprintf(stderr, "  PASS\n"); passed++;
+                } else { fprintf(stderr, "  FAIL (wrong list matched)\n"); failed++; }
+            } else { fprintf(stderr, "  FAIL (could not find lists)\n"); failed++; }
+        } else { fprintf(stderr, "  FAIL (could not create lists)\n"); failed++; }
+        cmdDeleteList(store, straightListName26);
+        cmdDeleteList(store, curlyListName26);
+    }
+
     // Cleanup
-    // Test 23: cmdDelete child
-    fprintf(stderr, "Test 23: cmdDelete child...\n");
+    // Test 27: cmdDelete child
+    fprintf(stderr, "Test 27: cmdDelete child...\n");
     {
-        id rem23 = findReminder(store, childTitle, testListName);
-        NSString *rem23ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem23, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem23ID);
+        id rem27 = findReminder(store, childTitle, testListName);
+        NSString *rem27ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem27, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem27ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 24: cmdDelete parent
-    fprintf(stderr, "Test 24: cmdDelete parent...\n");
+    // Test 28: cmdDelete parent
+    fprintf(stderr, "Test 28: cmdDelete parent...\n");
     {
-        id rem24 = findReminder(store, parentTitle, testListName);
-        NSString *rem24ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem24, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem24ID);
+        id rem28 = findReminder(store, parentTitle, testListName);
+        NSString *rem28ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem28, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem28ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 25: cmdDeleteList
-    fprintf(stderr, "Test 25: cmdDeleteList...\n");
+    // Test 29: cmdDeleteList
+    fprintf(stderr, "Test 29: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
