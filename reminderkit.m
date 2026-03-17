@@ -465,8 +465,13 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
-    // Re-fetch and return
-    id created = findReminder(store, title, listName);
+    // Re-fetch and return — use the resolved list name for accurate lookup
+    // (when --parent-id is used without --list, listName is nil but list was derived from parent)
+    NSString *resolvedListName = listName;
+    if (!resolvedListName) {
+        resolvedListName = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("name"));
+    }
+    id created = findReminder(store, title, resolvedListName);
     if (created) printJSON(reminderToDict(created));
     else fprintf(stderr, "Created (but could not re-fetch)\n");
     return 0;
@@ -1205,27 +1210,50 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (notes=%s)\n", [notes UTF8String]); failed++; }
     }
 
-    // Cleanup
-    // Test 22: cmdDelete child
-    fprintf(stderr, "Test 22: cmdDelete child...\n");
+    // Test 22: cmdAdd with --parent-id (create subtask in one step)
+    fprintf(stderr, "Test 22: cmdAdd with --parent-id...\n");
     {
-        id rem22 = findReminder(store, childTitle, testListName);
-        NSString *rem22ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem22, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem22ID);
-        if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
+        NSString *addParentChildTitle = @"__remcli_test_add_parent_child__";
+        id parentRem22 = findReminder(store, parentTitle, testListName);
+        NSString *parentID22 = objectIDToString(((id (*)(id, SEL))objc_msgSend)(parentRem22, sel_registerName("objectID")));
+        int r = cmdAdd(store, addParentChildTitle, nil, @{@"parent-id": parentID22});
+        if (r == 0) {
+            // Verify the child was created as a subtask of the parent
+            id child22 = findReminder(store, addParentChildTitle, testListName);
+            if (child22) {
+                id childPID22 = ((id (*)(id, SEL))objc_msgSend)(child22, sel_registerName("parentReminderID"));
+                id parentOID22 = ((id (*)(id, SEL))objc_msgSend)(parentRem22, sel_registerName("objectID"));
+                if (childPID22 && [objectIDToString(childPID22) isEqualToString:objectIDToString(parentOID22)]) {
+                    fprintf(stderr, "  PASS\n"); passed++;
+                } else { fprintf(stderr, "  FAIL (not parented correctly)\n"); failed++; }
+                // Clean up the add-parent child
+                NSString *child22ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(child22, sel_registerName("objectID")));
+                cmdDelete(store, testListName, child22ID);
+            } else { fprintf(stderr, "  FAIL (child not found in test list)\n"); failed++; }
+        } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
     }
 
-    // Test 23: cmdDelete parent
-    fprintf(stderr, "Test 23: cmdDelete parent...\n");
+    // Cleanup
+    // Test 23: cmdDelete child
+    fprintf(stderr, "Test 23: cmdDelete child...\n");
     {
-        id rem23 = findReminder(store, parentTitle, testListName);
+        id rem23 = findReminder(store, childTitle, testListName);
         NSString *rem23ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem23, sel_registerName("objectID")));
         int r = cmdDelete(store, testListName, rem23ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 24: cmdDeleteList
-    fprintf(stderr, "Test 24: cmdDeleteList...\n");
+    // Test 24: cmdDelete parent
+    fprintf(stderr, "Test 24: cmdDelete parent...\n");
+    {
+        id rem24 = findReminder(store, parentTitle, testListName);
+        NSString *rem24ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem24, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem24ID);
+        if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 25: cmdDeleteList
+    fprintf(stderr, "Test 25: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
