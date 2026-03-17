@@ -1008,7 +1008,8 @@ static int cmdBatch(id store) {
                 [results addObject:@{@"op": @"delete", @"id": remIDStr ?: @"", @"status": @"ok"}];
 
             } else if ([opType isEqualToString:@"update"]) {
-                if (op[@"url"] && op[@"clear-url"]) {
+                BOOL clearUrl = [op[@"clear-url"] boolValue];
+                if (op[@"url"] && clearUrl) {
                     errorExit(@"Cannot use 'url' and 'clear-url' together in batch update");
                 }
                 if (op[@"title"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setTitleAsString:"), op[@"title"]);
@@ -1022,7 +1023,7 @@ static int cmdBatch(id store) {
                 if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
                 if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
                 if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext")); ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), u); } }
-                if (op[@"clear-url"]) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext")); ((void (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("removeURLAttachments")); }
+                if (clearUrl) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext")); ((void (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("removeURLAttachments")); }
                 if (op[@"remove-parent"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromParentReminder"));
                 if (op[@"remove-from-list"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));
                 [results addObject:@{@"op": @"update", @"id": remIDStr ?: @"", @"status": @"ok"}];
