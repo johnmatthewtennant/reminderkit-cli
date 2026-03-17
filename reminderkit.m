@@ -304,9 +304,19 @@ static NSDictionary *reminderToDict(id rem) {
                     if (daysOfWeek && daysOfWeek.count > 0) {
                         NSMutableArray *days = [NSMutableArray array];
                         for (id day in daysOfWeek) {
-                            [days addObject:[day description]];
+                            NSMutableDictionary *dayDict = [NSMutableDictionary dictionary];
+                            @try {
+                                long long weekday = ((long long (*)(id, SEL))objc_msgSend)(day, sel_registerName("dayOfTheWeek"));
+                                // EKWeekday: 1=Sunday, 2=Monday, ..., 7=Saturday
+                                dayDict[@"dayOfTheWeek"] = @(weekday);
+                            } @catch (NSException *e) {}
+                            @try {
+                                long long weekNum = ((long long (*)(id, SEL))objc_msgSend)(day, sel_registerName("weekNumber"));
+                                if (weekNum != 0) dayDict[@"weekNumber"] = @(weekNum);
+                            } @catch (NSException *e) {}
+                            if (dayDict.count > 0) [days addObject:dayDict];
                         }
-                        ruleDict[@"daysOfTheWeek"] = days;
+                        if (days.count > 0) ruleDict[@"daysOfTheWeek"] = days;
                     }
                 } @catch (NSException *e) {}
                 @try {
@@ -344,9 +354,9 @@ static NSDictionary *reminderToDict(id rem) {
                         if (endDict.count > 0) ruleDict[@"recurrenceEnd"] = endDict;
                     }
                 } @catch (NSException *e) {}
-                [rulesArr addObject:ruleDict];
+                if (ruleDict.count > 0) [rulesArr addObject:ruleDict];
             }
-            dict[@"recurrenceRules"] = rulesArr;
+            if (rulesArr.count > 0) dict[@"recurrenceRules"] = rulesArr;
         }
     } @catch (NSException *e) {}
 
@@ -412,9 +422,9 @@ static NSDictionary *reminderToDict(id rem) {
                         }
                     }
                 } @catch (NSException *e) {}
-                [alarmsArr addObject:alarmDict];
+                if (alarmDict.count > 0) [alarmsArr addObject:alarmDict];
             }
-            dict[@"alarms"] = alarmsArr;
+            if (alarmsArr.count > 0) dict[@"alarms"] = alarmsArr;
         }
     } @catch (NSException *e) {}
 
@@ -488,9 +498,9 @@ static NSDictionary *reminderToDict(id rem) {
                     NSDate *assignedDate = ((id (*)(id, SEL))objc_msgSend)(assignment, sel_registerName("assignedDate"));
                     if (assignedDate) aDict[@"assignedDate"] = dateToISO(assignedDate);
                 } @catch (NSException *e) {}
-                [assignArr addObject:aDict];
+                if (aDict.count > 0) [assignArr addObject:aDict];
             }
-            dict[@"assignments"] = assignArr;
+            if (assignArr.count > 0) dict[@"assignments"] = assignArr;
         }
     } @catch (NSException *e) {}
 
