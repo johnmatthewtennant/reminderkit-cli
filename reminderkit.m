@@ -1233,31 +1233,29 @@ static int cmdInstallSkill(void) {
         return 1;
     }
 
-    // Remove existing symlink or file
-    if ([fm fileExistsAtPath:targetPath]) {
-        [fm removeItemAtPath:targetPath error:nil];
-    }
+    // Install to both skill directories, skipping if already present
+    NSArray *targetDirs = @[
+        [home stringByAppendingPathComponent:@".claude/skills/apple-reminders"],
+        [home stringByAppendingPathComponent:@".agents/skills/apple-reminders"],
+    ];
 
-    // Create symlink
-    if (![fm createSymbolicLinkAtPath:targetPath withDestinationPath:sourcePath error:&error]) {
-        fprintf(stderr, "Error: could not create symlink: %s\n",
-            [[error localizedDescription] UTF8String]);
-        return 1;
-    }
-
-    printf("Installed skill: %s -> %s\n", [targetPath UTF8String], [sourcePath UTF8String]);
-
-    // Also install to ~/.agents/skills/ if nothing exists there already
-    NSString *agentsDir = [home stringByAppendingPathComponent:@".agents/skills/apple-reminders"];
-    NSString *agentsPath = [agentsDir stringByAppendingPathComponent:@"SKILL.md"];
-    if (![fm fileExistsAtPath:agentsPath]) {
-        if ([fm createDirectoryAtPath:agentsDir withIntermediateDirectories:YES attributes:nil error:&error]) {
-            if ([fm createSymbolicLinkAtPath:agentsPath withDestinationPath:sourcePath error:&error]) {
-                printf("Installed skill: %s -> %s\n", [agentsPath UTF8String], [sourcePath UTF8String]);
-            }
+    for (NSString *dir in targetDirs) {
+        NSString *path = [dir stringByAppendingPathComponent:@"SKILL.md"];
+        if ([fm fileExistsAtPath:path]) {
+            printf("Skipped: %s (already exists)\n", [path UTF8String]);
+            continue;
         }
-    } else {
-        printf("Skipped: %s (already exists)\n", [agentsPath UTF8String]);
+        if (![fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:&error]) {
+            fprintf(stderr, "Error: could not create directory %s: %s\n",
+                [dir UTF8String], [[error localizedDescription] UTF8String]);
+            continue;
+        }
+        if (![fm createSymbolicLinkAtPath:path withDestinationPath:sourcePath error:&error]) {
+            fprintf(stderr, "Error: could not create symlink: %s\n",
+                [[error localizedDescription] UTF8String]);
+            continue;
+        }
+        printf("Installed skill: %s -> %s\n", [path UTF8String], [sourcePath UTF8String]);
     }
 
     return 0;
