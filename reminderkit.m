@@ -358,11 +358,58 @@ static int cmdSubtasks(id store, NSString *title, NSString *listName) {
     return 0;
 }
 
+// Find list by objectID string. Returns nil if not found.
+static id findListByObjectID(id store, id targetObjID) {
+    NSArray *allLists = fetchLists(store);
+    for (id l in allLists) {
+        id lID = ((id (*)(id, SEL))objc_msgSend)(l, sel_registerName("objectID"));
+        if ([objectIDToString(lID) isEqualToString:objectIDToString(targetObjID)]) {
+            return l;
+        }
+    }
+    return nil;
+}
+
+// Shared helper: reparent a reminder change item under a parent.
+static void reparentChangeItem(id store, id saveReq, id listCI, id childCI, NSString *parentID) {
+    id parentRem = findReminderByID(store, parentID);
+    if (!parentRem) errorExit([NSString stringWithFormat:@"Parent not found with id: %@", parentID]);
+
+    id parentCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateReminder:"), parentRem);
+
+    ((void (*)(id, SEL, id, id))objc_msgSend)(
+        listCI, sel_registerName("_reassignReminderChangeItem:withParentReminderChangeItem:"),
+        childCI, parentCI);
+}
+
 static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *opts) {
-    id list = listName ? findList(store, listName) : [fetchLists(store) firstObject];
+    id list = nil;
+    NSString *parentID = opts[@"parent-id"];
+
+    if (parentID) {
+        // Look up parent to derive/validate list
+        id parentRem = findReminderByID(store, parentID);
+        if (!parentRem) errorExit([NSString stringWithFormat:@"Parent not found with id: %@", parentID]);
+
+        id parentListID = ((id (*)(id, SEL))objc_msgSend)(parentRem, sel_registerName("listID"));
+        list = findListByObjectID(store, parentListID);
+        if (!list) errorExit(@"Could not find parent's list");
+
+        // If --list was also specified, validate it matches
+        if (listName) {
+            id specifiedList = findList(store, listName);
+            if (!specifiedList) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
+            id specListID = ((id (*)(id, SEL))objc_msgSend)(specifiedList, sel_registerName("objectID"));
+            if (![objectIDToString(specListID) isEqualToString:objectIDToString(parentListID)]) {
+                errorExit(@"--parent-id and --list conflict: parent is in a different list. Omit --list to auto-derive from parent.");
+            }
+        }
+    } else {
+        list = listName ? findList(store, listName) : [fetchLists(store) firstObject];
+    }
     if (!list) errorExit(@"No list found");
 
-    id listChangeItem = nil;
     // Get the list change item from save request
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
@@ -408,13 +455,24 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
         }
     }
 
+    // Reparent: --parent-id
+    if (opts[@"parent-id"]) {
+        reparentChangeItem(store, saveReq, listCI, newRem, opts[@"parent-id"]);
+    }
+
     NSError *error = nil;
     BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
-    // Re-fetch and return
-    id created = findReminder(store, title, listName);
+    // Re-fetch and return — use the resolved list name for accurate lookup
+    // (when --parent-id is used without --list, listName is nil but list was derived from parent)
+    NSString *resolvedListName = listName;
+    if (!resolvedListName) {
+        id listStorage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+        resolvedListName = ((id (*)(id, SEL))objc_msgSend)(listStorage, sel_registerName("name"));
+    }
+    id created = findReminder(store, title, resolvedListName);
     if (created) printJSON(reminderToDict(created));
     else fprintf(stderr, "Created (but could not re-fetch)\n");
     return 0;
@@ -682,38 +740,24 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
 
     // Reparent: --parent-id
     if (parentID) {
+        // Validate no self-parenting (update-specific)
+        id remObjID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));
         id parentRem = findReminderByID(store, parentID);
         if (!parentRem) errorExit([NSString stringWithFormat:@"Parent not found with id: %@", parentID]);
-
-        // Validate no self-parenting
-        id remObjID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));
         id parentObjID = ((id (*)(id, SEL))objc_msgSend)(parentRem, sel_registerName("objectID"));
         if ([objectIDToString(remObjID) isEqualToString:objectIDToString(parentObjID)]) {
             errorExit(@"Cannot set a reminder as its own parent");
         }
 
-        // Get the list for reparenting
+        // Get the list for reparenting using shared helper
         id remListID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("listID"));
-        NSArray *allLists = fetchLists(store);
-        id targetList = nil;
-        for (id l in allLists) {
-            id lID = ((id (*)(id, SEL))objc_msgSend)(l, sel_registerName("objectID"));
-            if ([objectIDToString(lID) isEqualToString:objectIDToString(remListID)]) {
-                targetList = l;
-                break;
-            }
-        }
+        id targetList = findListByObjectID(store, remListID);
         if (!targetList) errorExit(@"Could not find list for reparenting");
 
         id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
             saveReq, sel_registerName("updateList:"), targetList);
 
-        id parentCI = ((id (*)(id, SEL, id))objc_msgSend)(
-            saveReq, sel_registerName("updateReminder:"), parentRem);
-
-        ((void (*)(id, SEL, id, id))objc_msgSend)(
-            listCI, sel_registerName("_reassignReminderChangeItem:withParentReminderChangeItem:"),
-            changeItem, parentCI);
+        reparentChangeItem(store, saveReq, listCI, changeItem, parentID);
     }
 
     // Move to different list: --to-list
@@ -858,7 +902,29 @@ static int cmdBatch(id store) {
         NSString *opList = op[@"list"];
 
         if ([opType isEqualToString:@"add"]) {
-            id list = opList ? findList(store, opList) : [fetchLists(store) firstObject];
+            id list = nil;
+            NSString *batchParentID = op[@"parent-id"];
+
+            if (batchParentID) {
+                // Derive/validate list from parent, same as cmdAdd
+                id batchParentRem = findReminderByID(store, batchParentID);
+                if (!batchParentRem) errorExit([NSString stringWithFormat:@"Parent not found with id: %@", batchParentID]);
+                id batchParentListID = ((id (*)(id, SEL))objc_msgSend)(batchParentRem, sel_registerName("listID"));
+                list = findListByObjectID(store, batchParentListID);
+                if (!list) errorExit(@"Batch add: could not find parent's list");
+
+                if (opList) {
+                    // If list was explicitly specified, validate it matches parent's list
+                    id specifiedList = findList(store, opList);
+                    if (!specifiedList) errorExit([NSString stringWithFormat:@"List not found: %@", opList]);
+                    id specListID = ((id (*)(id, SEL))objc_msgSend)(specifiedList, sel_registerName("objectID"));
+                    if (![objectIDToString(specListID) isEqualToString:objectIDToString(batchParentListID)]) {
+                        errorExit(@"Batch add: parent is in a different list than the specified list");
+                    }
+                }
+            } else {
+                list = opList ? findList(store, opList) : [fetchLists(store) firstObject];
+            }
             if (!list) errorExit(@"No list found for add operation");
 
             id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
@@ -875,6 +941,11 @@ static int cmdBatch(id store) {
             if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
             if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
             if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(newRem, sel_registerName("attachmentContext")); ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), u); } }
+
+            // Reparent if parent-id specified
+            if (batchParentID) {
+                reparentChangeItem(store, saveReq, listCI, newRem, batchParentID);
+            }
 
             [results addObject:@{@"op": @"add", @"title": opTitle, @"status": @"ok"}];
 
@@ -1140,27 +1211,50 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (notes=%s)\n", [notes UTF8String]); failed++; }
     }
 
-    // Cleanup
-    // Test 22: cmdDelete child
-    fprintf(stderr, "Test 22: cmdDelete child...\n");
+    // Test 22: cmdAdd with --parent-id (create subtask in one step)
+    fprintf(stderr, "Test 22: cmdAdd with --parent-id...\n");
     {
-        id rem22 = findReminder(store, childTitle, testListName);
-        NSString *rem22ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem22, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem22ID);
-        if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
+        NSString *addParentChildTitle = @"__remcli_test_add_parent_child__";
+        id parentRem22 = findReminder(store, parentTitle, testListName);
+        NSString *parentID22 = objectIDToString(((id (*)(id, SEL))objc_msgSend)(parentRem22, sel_registerName("objectID")));
+        int r = cmdAdd(store, addParentChildTitle, nil, @{@"parent-id": parentID22});
+        if (r == 0) {
+            // Verify the child was created as a subtask of the parent
+            id child22 = findReminder(store, addParentChildTitle, testListName);
+            if (child22) {
+                id childPID22 = ((id (*)(id, SEL))objc_msgSend)(child22, sel_registerName("parentReminderID"));
+                id parentOID22 = ((id (*)(id, SEL))objc_msgSend)(parentRem22, sel_registerName("objectID"));
+                if (childPID22 && [objectIDToString(childPID22) isEqualToString:objectIDToString(parentOID22)]) {
+                    fprintf(stderr, "  PASS\n"); passed++;
+                } else { fprintf(stderr, "  FAIL (not parented correctly)\n"); failed++; }
+                // Clean up the add-parent child
+                NSString *child22ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(child22, sel_registerName("objectID")));
+                cmdDelete(store, testListName, child22ID);
+            } else { fprintf(stderr, "  FAIL (child not found in test list)\n"); failed++; }
+        } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
     }
 
-    // Test 23: cmdDelete parent
-    fprintf(stderr, "Test 23: cmdDelete parent...\n");
+    // Cleanup
+    // Test 23: cmdDelete child
+    fprintf(stderr, "Test 23: cmdDelete child...\n");
     {
-        id rem23 = findReminder(store, parentTitle, testListName);
+        id rem23 = findReminder(store, childTitle, testListName);
         NSString *rem23ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem23, sel_registerName("objectID")));
         int r = cmdDelete(store, testListName, rem23ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 24: cmdDeleteList
-    fprintf(stderr, "Test 24: cmdDeleteList...\n");
+    // Test 24: cmdDelete parent
+    fprintf(stderr, "Test 24: cmdDelete parent...\n");
+    {
+        id rem24 = findReminder(store, parentTitle, testListName);
+        NSString *rem24ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem24, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem24ID);
+        if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 25: cmdDeleteList
+    fprintf(stderr, "Test 25: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
@@ -1276,7 +1370,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit list --name <name> [--include-completed]\n");
     fprintf(stderr, "  reminderkit get --title <title> [--list <name>]\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
-    fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>]\n");
+    fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
     fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
     fprintf(stderr, "  reminderkit complete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
