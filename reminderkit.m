@@ -1255,20 +1255,20 @@ static int cmdInstallSkill(void) {
 static void usage(void) {
     fprintf(stderr, "Usage:\n");
     fprintf(stderr, "  reminderkit lists\n");
-    fprintf(stderr, "  reminderkit list (<name> | --name <name>) [--include-completed]\n");
-    fprintf(stderr, "  reminderkit get (<title> | --title <title>) [--list <name>]\n");
-    fprintf(stderr, "  reminderkit subtasks (<title> | --title <title>) [--list <name>]\n");
-    fprintf(stderr, "  reminderkit add (<title> | --title <title>) [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>]\n");
+    fprintf(stderr, "  reminderkit list --name <name> [--include-completed]\n");
+    fprintf(stderr, "  reminderkit get --title <title> [--list <name>]\n");
+    fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
+    fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>]\n");
     fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
     fprintf(stderr, "  reminderkit complete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
-    fprintf(stderr, "  reminderkit add-tag --id <id> (<tag-name> | --tag <tag-name>)\n");
-    fprintf(stderr, "  reminderkit remove-tag --id <id> (<tag-name> | --tag <tag-name>)\n");
-    fprintf(stderr, "  reminderkit list-sections (<list-name> | --name <list-name>)\n");
-    fprintf(stderr, "  reminderkit create-section (<list-name> | --name <list-name>) (<section-name> | --section <section-name>)\n");
-    fprintf(stderr, "  reminderkit create-list (<name> | --name <name>)\n");
-    fprintf(stderr, "  reminderkit rename-list (<old-name> | --old-name <old-name>) (<new-name> | --new-name <new-name>)\n");
-    fprintf(stderr, "  reminderkit delete-list (<name> | --name <name>)\n");
+    fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\n");
+    fprintf(stderr, "  reminderkit remove-tag --id <id> --tag <tag-name>\n");
+    fprintf(stderr, "  reminderkit list-sections --name <list-name>\n");
+    fprintf(stderr, "  reminderkit create-section --name <list-name> --section <section-name>\n");
+    fprintf(stderr, "  reminderkit create-list --name <name>\n");
+    fprintf(stderr, "  reminderkit rename-list --old-name <old-name> --new-name <new-name>\n");
+    fprintf(stderr, "  reminderkit delete-list --name <name>\n");
     fprintf(stderr, "  reminderkit batch  (reads JSON array from stdin)\n");
     fprintf(stderr, "\n  Skill management:\n");
     fprintf(stderr, "  reminderkit install-skill\n");
@@ -1322,28 +1322,38 @@ int main(int argc, const char *argv[]) {
         NSString *listName = opts[@"list"];
         id store = getStore();
 
+        // Reject unexpected positional arguments
+        if (positional.count > 0 &&
+            ![command isEqualToString:@"batch"] &&
+            ![command isEqualToString:@"lists"] &&
+            ![command isEqualToString:@"install-skill"] &&
+            ![command isEqualToString:@"test"] &&
+            ![command isEqualToString:@"help"] &&
+            ![command isEqualToString:@"--help"] &&
+            ![command isEqualToString:@"-h"]) {
+            fprintf(stderr, "Error: unexpected argument '%s'. All arguments must use --flag syntax.\n", [positional[0] UTF8String]);
+            usage();
+            return 1;
+        }
+
         if ([command isEqualToString:@"lists"]) {
             return cmdLists(store);
 
         } else if ([command isEqualToString:@"list"]) {
-            NSString *name = kwName ?: (positional.count > 0 ? positional[0] : nil);
-            if (!name) { fprintf(stderr, "Error: list name required\n"); usage(); return 1; }
-            return cmdList(store, name, includeCompleted);
+            if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
+            return cmdList(store, kwName, includeCompleted);
 
         } else if ([command isEqualToString:@"get"]) {
-            NSString *title = kwTitle ?: (positional.count > 0 ? positional[0] : nil);
-            if (!title) { fprintf(stderr, "Error: title required\n"); usage(); return 1; }
-            return cmdGet(store, title, listName);
+            if (!kwTitle) { fprintf(stderr, "Error: --title required\n"); usage(); return 1; }
+            return cmdGet(store, kwTitle, listName);
 
         } else if ([command isEqualToString:@"subtasks"]) {
-            NSString *title = kwTitle ?: (positional.count > 0 ? positional[0] : nil);
-            if (!title) { fprintf(stderr, "Error: title required\n"); usage(); return 1; }
-            return cmdSubtasks(store, title, listName);
+            if (!kwTitle) { fprintf(stderr, "Error: --title required\n"); usage(); return 1; }
+            return cmdSubtasks(store, kwTitle, listName);
 
         } else if ([command isEqualToString:@"add"]) {
-            NSString *title = kwTitle ?: (positional.count > 0 ? positional[0] : nil);
-            if (!title) { fprintf(stderr, "Error: title required\n"); usage(); return 1; }
-            return cmdAdd(store, title, listName, opts);
+            if (!kwTitle) { fprintf(stderr, "Error: --title required\n"); usage(); return 1; }
+            return cmdAdd(store, kwTitle, listName, opts);
 
         } else if ([command isEqualToString:@"update"]) {
             if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
@@ -1361,43 +1371,34 @@ int main(int argc, const char *argv[]) {
             return cmdBatch(store);
 
         } else if ([command isEqualToString:@"add-tag"]) {
-            NSString *tag = kwTag ?: (positional.count > 0 ? positional[0] : nil);
             if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
-            if (!tag) { fprintf(stderr, "Error: tag name required\n"); usage(); return 1; }
-            return cmdAddTag(store, opts[@"id"], tag);
+            if (!kwTag) { fprintf(stderr, "Error: --tag required\n"); usage(); return 1; }
+            return cmdAddTag(store, opts[@"id"], kwTag);
 
         } else if ([command isEqualToString:@"remove-tag"]) {
-            NSString *tag = kwTag ?: (positional.count > 0 ? positional[0] : nil);
             if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
-            if (!tag) { fprintf(stderr, "Error: tag name required\n"); usage(); return 1; }
-            return cmdRemoveTag(store, opts[@"id"], tag);
+            if (!kwTag) { fprintf(stderr, "Error: --tag required\n"); usage(); return 1; }
+            return cmdRemoveTag(store, opts[@"id"], kwTag);
 
         } else if ([command isEqualToString:@"list-sections"]) {
-            NSString *name = kwName ?: (positional.count > 0 ? positional[0] : nil);
-            if (!name) { fprintf(stderr, "Error: list name required\n"); usage(); return 1; }
-            return cmdListSections(store, name);
+            if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
+            return cmdListSections(store, kwName);
 
         } else if ([command isEqualToString:@"create-section"]) {
-            NSString *name = kwName ?: (positional.count > 0 ? positional[0] : nil);
-            NSString *section = kwSection ?: (positional.count > 1 ? positional[1] : nil);
-            if (!name || !section) { fprintf(stderr, "Error: list name and section name required\n"); usage(); return 1; }
-            return cmdCreateSection(store, name, section);
+            if (!kwName || !kwSection) { fprintf(stderr, "Error: --name and --section required\n"); usage(); return 1; }
+            return cmdCreateSection(store, kwName, kwSection);
 
         } else if ([command isEqualToString:@"create-list"]) {
-            NSString *name = kwName ?: (positional.count > 0 ? positional[0] : nil);
-            if (!name) { fprintf(stderr, "Error: list name required\n"); usage(); return 1; }
-            return cmdCreateList(store, name);
+            if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
+            return cmdCreateList(store, kwName);
 
         } else if ([command isEqualToString:@"rename-list"]) {
-            NSString *oldName = kwOldName ?: (positional.count > 0 ? positional[0] : nil);
-            NSString *newName = kwNewName ?: (positional.count > 1 ? positional[1] : nil);
-            if (!oldName || !newName) { fprintf(stderr, "Error: old and new names required\n"); usage(); return 1; }
-            return cmdRenameList(store, oldName, newName);
+            if (!kwOldName || !kwNewName) { fprintf(stderr, "Error: --old-name and --new-name required\n"); usage(); return 1; }
+            return cmdRenameList(store, kwOldName, kwNewName);
 
         } else if ([command isEqualToString:@"delete-list"]) {
-            NSString *name = kwName ?: (positional.count > 0 ? positional[0] : nil);
-            if (!name) { fprintf(stderr, "Error: list name required\n"); usage(); return 1; }
-            return cmdDeleteList(store, name);
+            if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
+            return cmdDeleteList(store, kwName);
 
         } else if ([command isEqualToString:@"install-skill"]) {
             return cmdInstallSkill();
