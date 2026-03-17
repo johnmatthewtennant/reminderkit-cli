@@ -836,6 +836,21 @@ static int cmdDelete(id store, NSString *listName, NSString *remID) {
 }
 
 
+// --- Link Note Command ---
+
+static int cmdLinkNote(id store, NSString *remId, NSString *noteId) {
+    // Construct applenotes:// URL
+    NSURLComponents *comps = [[NSURLComponents alloc] init];
+    comps.scheme = @"applenotes";
+    comps.host = @"showNote";
+    comps.queryItems = @[[NSURLQueryItem queryItemWithName:@"identifier" value:noteId]];
+    NSString *urlStr = [comps string];
+
+    // Delegate to cmdUpdate with the constructed URL
+    return cmdUpdate(store, nil, @{@"id": remId, @"url": urlStr});
+}
+
+
 // --- Batch Command ---
 
 static int cmdBatch(id store) {
@@ -1025,15 +1040,15 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 1: cmdCreateList...\n");
     { int r = cmdCreateList(store, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; return 1; } }
 
-    // Test 2: cmdLists (call actual command, verify it returns without error)
+    // Test 2: cmdLists
     fprintf(stderr, "Test 2: cmdLists...\n");
     { int r = cmdLists(store); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 3: cmdAdd (create reminder with notes and priority)
+    // Test 3: cmdAdd
     fprintf(stderr, "Test 3: cmdAdd...\n");
     { int r = cmdAdd(store, parentTitle, testListName, @{@"notes": @"Test notes", @"priority": @"5"}); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 4: cmdGet (call actual command)
+    // Test 4: cmdGet
     fprintf(stderr, "Test 4: cmdGet...\n");
     { int r = cmdGet(store, parentTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
@@ -1068,7 +1083,7 @@ static int cmdTest(id store) {
         if (r2==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 8: cmdSubtasks (verify parent-child)
+    // Test 8: Verify parent-child
     fprintf(stderr, "Test 8: Verify parent-child...\n");
     {
         id child = findReminder(store, childTitle, testListName);
@@ -1089,7 +1104,7 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 10: Verify tag in reminderToDict
+    // Test 10: Verify tag
     fprintf(stderr, "Test 10: Verify tag...\n");
     {
         id rem = findReminder(store, parentTitle, testListName);
@@ -1108,7 +1123,7 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 12: cmdComplete (complete child)
+    // Test 12: cmdComplete
     fprintf(stderr, "Test 12: cmdComplete...\n");
     {
         id rem12 = findReminder(store, childTitle, testListName);
@@ -1117,11 +1132,11 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 13: cmdList (call actual command)
+    // Test 13: cmdList
     fprintf(stderr, "Test 13: cmdList...\n");
     { int r = cmdList(store, testListName, NO); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 14: Verify JSON shape from reminderToDict
+    // Test 14: JSON shape
     fprintf(stderr, "Test 14: JSON shape...\n");
     {
         id rem = findReminder(store, parentTitle, testListName);
@@ -1141,7 +1156,7 @@ static int cmdTest(id store) {
         }
     }
 
-    // Test 15: cmdUpdate --title (rename)
+    // Test 15: Rename via update
     fprintf(stderr, "Test 15: Rename via update...\n");
     {
         NSString *renamedTitle = @"__remcli_test_renamed__";
@@ -1151,7 +1166,6 @@ static int cmdTest(id store) {
         if (r == 0) {
             id found = findReminder(store, renamedTitle, testListName);
             if (found) {
-                // Rename back
                 cmdUpdate(store, testListName, @{@"id": rem15ID, @"title": parentTitle});
                 fprintf(stderr, "  PASS\n"); passed++;
             } else { fprintf(stderr, "  FAIL (not found after rename)\n"); failed++; }
@@ -1166,18 +1180,17 @@ static int cmdTest(id store) {
         if (r == 0) {
             id found = findList(store, renamedList);
             if (found) {
-                // Rename back
                 cmdRenameList(store, renamedList, testListName);
                 fprintf(stderr, "  PASS\n"); passed++;
             } else { fprintf(stderr, "  FAIL (not found after rename)\n"); failed++; }
         } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 17: cmdSubtasks (call actual command)
+    // Test 17: cmdSubtasks
     fprintf(stderr, "Test 17: cmdSubtasks...\n");
     { int r = cmdSubtasks(store, parentTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 18: Error path - find non-existent reminder
+    // Test 18: Error path (not found)
     fprintf(stderr, "Test 18: Error path (not found)...\n");
     {
         id notFound = findReminder(store, @"__nonexistent_reminder_999__", testListName);
@@ -1185,7 +1198,7 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (should be nil)\n"); failed++; }
     }
 
-    // Test 19: Error path - find non-existent list
+    // Test 19: Error path (list not found)
     fprintf(stderr, "Test 19: Error path (list not found)...\n");
     {
         id notFound = findList(store, @"__nonexistent_list_999__");
@@ -1193,7 +1206,7 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (should be nil)\n"); failed++; }
     }
 
-    // Test 20: cmdUpdate --append-notes
+    // Test 20: --append-notes
     fprintf(stderr, "Test 20: cmdUpdate --append-notes...\n");
     {
         id rem20 = findReminder(store, parentTitle, testListName);
@@ -1202,7 +1215,7 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 21: Verify --append-notes
+    // Test 21: Verify append-notes
     fprintf(stderr, "Test 21: Verify append-notes...\n");
     {
         id rem = findReminder(store, parentTitle, testListName);
@@ -1211,7 +1224,7 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (notes=%s)\n", [notes UTF8String]); failed++; }
     }
 
-    // Test 22: cmdAdd with --parent-id (create subtask in one step)
+    // Test 22: cmdAdd with --parent-id
     fprintf(stderr, "Test 22: cmdAdd with --parent-id...\n");
     {
         NSString *addParentChildTitle = @"__remcli_test_add_parent_child__";
@@ -1219,7 +1232,6 @@ static int cmdTest(id store) {
         NSString *parentID22 = objectIDToString(((id (*)(id, SEL))objc_msgSend)(parentRem22, sel_registerName("objectID")));
         int r = cmdAdd(store, addParentChildTitle, nil, @{@"parent-id": parentID22});
         if (r == 0) {
-            // Verify the child was created as a subtask of the parent
             id child22 = findReminder(store, addParentChildTitle, testListName);
             if (child22) {
                 id childPID22 = ((id (*)(id, SEL))objc_msgSend)(child22, sel_registerName("parentReminderID"));
@@ -1227,34 +1239,48 @@ static int cmdTest(id store) {
                 if (childPID22 && [objectIDToString(childPID22) isEqualToString:objectIDToString(parentOID22)]) {
                     fprintf(stderr, "  PASS\n"); passed++;
                 } else { fprintf(stderr, "  FAIL (not parented correctly)\n"); failed++; }
-                // Clean up the add-parent child
                 NSString *child22ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(child22, sel_registerName("objectID")));
                 cmdDelete(store, testListName, child22ID);
             } else { fprintf(stderr, "  FAIL (child not found in test list)\n"); failed++; }
         } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
     }
 
-    // Cleanup
-    // Test 23: cmdDelete child
-    fprintf(stderr, "Test 23: cmdDelete child...\n");
+    // Test 23: Parentheses in title
+    fprintf(stderr, "Test 23: Parentheses in title...\n");
     {
-        id rem23 = findReminder(store, childTitle, testListName);
-        NSString *rem23ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem23, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem23ID);
-        if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
+        NSString *parensTitle = @"__remcli_test_parens (hello)__";
+        int r = cmdAdd(store, parensTitle, testListName, @{});
+        if (r == 0) {
+            id found = findReminder(store, parensTitle, testListName);
+            if (found) {
+                fprintf(stderr, "  PASS\n"); passed++;
+                NSString *foundID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(found, sel_registerName("objectID")));
+                cmdDelete(store, testListName, foundID);
+            } else { fprintf(stderr, "  FAIL (not found after create)\n"); failed++; }
+        } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
     }
 
-    // Test 24: cmdDelete parent
-    fprintf(stderr, "Test 24: cmdDelete parent...\n");
+    // Cleanup
+    // Test 24: cmdDelete child
+    fprintf(stderr, "Test 24: cmdDelete child...\n");
     {
-        id rem24 = findReminder(store, parentTitle, testListName);
+        id rem24 = findReminder(store, childTitle, testListName);
         NSString *rem24ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem24, sel_registerName("objectID")));
         int r = cmdDelete(store, testListName, rem24ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 25: cmdDeleteList
-    fprintf(stderr, "Test 25: cmdDeleteList...\n");
+    // Test 25: cmdDelete parent
+    fprintf(stderr, "Test 25: cmdDelete parent...\n");
+    {
+        id rem25 = findReminder(store, parentTitle, testListName);
+        NSString *rem25ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem25, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem25ID);
+        if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 26: cmdDeleteList
+    fprintf(stderr, "Test 26: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
@@ -1265,18 +1291,16 @@ static int cmdTest(id store) {
 }
 
 
+
 // --- Install Skill ---
 
 static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
-    // Get path of currently running binary
     char execPath[PATH_MAX];
     uint32_t size = sizeof(execPath);
     if (_NSGetExecutablePath(execPath, &size) != 0) {
         fprintf(stderr, "Error: could not determine executable path\n");
         return 1;
     }
-
-    // Resolve symlinks to get the real path
     char realPath[PATH_MAX];
     if (!realpath(execPath, realPath)) {
         fprintf(stderr, "Error: could not resolve executable path\n");
@@ -1286,10 +1310,6 @@ static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
     NSString *binaryPath = [NSString stringWithUTF8String:realPath];
     NSString *binDir = [binaryPath stringByDeletingLastPathComponent];
 
-    // Try to find SKILL.md relative to the binary
-    // Homebrew: /opt/homebrew/Cellar/reminderkit-cli/X.Y.Z/bin/reminderkit
-    //   skill: /opt/homebrew/Cellar/reminderkit-cli/X.Y.Z/.agents/skills/apple-reminders/SKILL.md
-    // Build dir: ./reminderkit  ->  ./.agents/skills/apple-reminders/SKILL.md
     NSArray *candidates = @[
         [[binDir stringByDeletingLastPathComponent] stringByAppendingPathComponent:@".agents/skills/apple-reminders/SKILL.md"],
         [[binDir stringByAppendingPathComponent:@".."] stringByAppendingPathComponent:@".agents/skills/apple-reminders/SKILL.md"],
@@ -1315,23 +1335,13 @@ static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
         return 1;
     }
 
-    // Create target directory
     NSString *home = NSHomeDirectory();
-    NSString *targetDir = [home stringByAppendingPathComponent:@".claude/skills/apple-reminders"];
-    NSString *targetPath = [targetDir stringByAppendingPathComponent:@"SKILL.md"];
 
-    NSError *error = nil;
-    if (![fm createDirectoryAtPath:targetDir withIntermediateDirectories:YES attributes:nil error:&error]) {
-        fprintf(stderr, "Error: could not create directory %s: %s\n",
-            [targetDir UTF8String], [[error localizedDescription] UTF8String]);
-        return 1;
-    }
-
-    // Install to selected skill directories
     NSMutableArray *targetDirs = [NSMutableArray array];
     if (installClaude) [targetDirs addObject:[home stringByAppendingPathComponent:@".claude/skills/apple-reminders"]];
     if (installAgents) [targetDirs addObject:[home stringByAppendingPathComponent:@".agents/skills/apple-reminders"]];
 
+    NSError *error = nil;
     int failures = 0;
     for (NSString *dir in targetDirs) {
         NSString *path = [dir stringByAppendingPathComponent:@"SKILL.md"];
@@ -1376,6 +1386,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\n");
     fprintf(stderr, "  reminderkit remove-tag --id <id> --tag <tag-name>\n");
+    fprintf(stderr, "  reminderkit link-note --id <id> --note-id <note-id>\n");
     fprintf(stderr, "  reminderkit list-sections --name <list-name>\n");
     fprintf(stderr, "  reminderkit create-section --name <list-name> --section <section-name>\n");
     fprintf(stderr, "  reminderkit create-list --name <name>\n");
@@ -1412,6 +1423,7 @@ int main(int argc, const char *argv[]) {
                     [flag isEqualToString:@"remove-parent"] ||
                     [flag isEqualToString:@"remove-from-list"] ||
                     [flag isEqualToString:@"help"] ||
+                    [flag isEqualToString:@"clear-url"] ||
                     [flag isEqualToString:@"claude"] ||
                     [flag isEqualToString:@"agents"] ||
                     [flag isEqualToString:@"force"]) {
@@ -1425,8 +1437,6 @@ int main(int argc, const char *argv[]) {
             }
         }
 
-        // Resolve keyword args: --title, --name, --tag, --section, --old-name, --new-name
-        // Keyword args take priority over positional args
         NSString *kwTitle = opts[@"title"];
         NSString *kwName = opts[@"name"];
         NSString *kwTag = opts[@"tag"];
@@ -1495,6 +1505,11 @@ int main(int argc, const char *argv[]) {
             if (!kwTag) { fprintf(stderr, "Error: --tag required\n"); usage(); return 1; }
             return cmdRemoveTag(store, opts[@"id"], kwTag);
 
+        } else if ([command isEqualToString:@"link-note"]) {
+            if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
+            if (!opts[@"note-id"] || [opts[@"note-id"] length] == 0) { fprintf(stderr, "Error: --note-id required\n"); usage(); return 1; }
+            return cmdLinkNote(store, opts[@"id"], opts[@"note-id"]);
+
         } else if ([command isEqualToString:@"list-sections"]) {
             if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
             return cmdListSections(store, kwName);
@@ -1519,7 +1534,6 @@ int main(int argc, const char *argv[]) {
             BOOL wantClaude = [opts[@"claude"] isEqualToString:@"true"];
             BOOL wantAgents = [opts[@"agents"] isEqualToString:@"true"];
             BOOL force = [opts[@"force"] isEqualToString:@"true"];
-            // Default: install to both
             if (!wantClaude && !wantAgents) { wantClaude = YES; wantAgents = YES; }
             return cmdInstallSkill(wantClaude, wantAgents, force);
 
