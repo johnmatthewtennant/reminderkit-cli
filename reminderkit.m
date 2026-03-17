@@ -469,7 +469,8 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
     // (when --parent-id is used without --list, listName is nil but list was derived from parent)
     NSString *resolvedListName = listName;
     if (!resolvedListName) {
-        resolvedListName = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("name"));
+        id listStorage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+        resolvedListName = ((id (*)(id, SEL))objc_msgSend)(listStorage, sel_registerName("name"));
     }
     id created = findReminder(store, title, resolvedListName);
     if (created) printJSON(reminderToDict(created));
