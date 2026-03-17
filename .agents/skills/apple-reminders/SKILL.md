@@ -29,6 +29,39 @@ Command-line interface for Apple Reminders. Built on the private ReminderKit fra
 - `reminderkit list --name "List"` — list reminders in a list
 - `reminderkit get --title "Title" --list "List"` — find a reminder by title
 
+## Linking reminders to Apple Notes
+
+Link a reminder to an Apple Note using the `link-note` command:
+
+```bash
+reminderkit link-note --id <reminder-id> --note-id <note-identifier>
+```
+
+Or manually with `--url`:
+
+```bash
+# Get the note's link URL
+NOTE_URL=$(notekit get-link --id "<note-id>" | jq -r '.url')
+
+# Set it on the reminder
+reminderkit update --id "<reminder-id>" --url "$NOTE_URL"
+```
+
+When a reminder's URL is an `applenotes://showNote` URL, the JSON output includes a `linkedNoteId` field with the note identifier:
+
+```json
+{
+  "url": "applenotes://showNote?identifier=NOTE-UUID",
+  "linkedNoteId": "NOTE-UUID"
+}
+```
+
+To clear a reminder's URL:
+
+```bash
+reminderkit update --id <id> --clear-url
+```
+
 ## `reminderkit --help` (auto-executed)
 
 !`brew list --versions reminderkit-cli && reminderkit help 2>&1 || echo "reminderkit-cli is not installed"`
