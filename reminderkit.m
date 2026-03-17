@@ -1246,6 +1246,20 @@ static int cmdInstallSkill(void) {
     }
 
     printf("Installed skill: %s -> %s\n", [targetPath UTF8String], [sourcePath UTF8String]);
+
+    // Also install to ~/.agents/skills/ if nothing exists there already
+    NSString *agentsDir = [home stringByAppendingPathComponent:@".agents/skills/apple-reminders"];
+    NSString *agentsPath = [agentsDir stringByAppendingPathComponent:@"SKILL.md"];
+    if (![fm fileExistsAtPath:agentsPath]) {
+        if ([fm createDirectoryAtPath:agentsDir withIntermediateDirectories:YES attributes:nil error:&error]) {
+            if ([fm createSymbolicLinkAtPath:agentsPath withDestinationPath:sourcePath error:&error]) {
+                printf("Installed skill: %s -> %s\n", [agentsPath UTF8String], [sourcePath UTF8String]);
+            }
+        }
+    } else {
+        printf("Skipped: %s (already exists)\n", [agentsPath UTF8String]);
+    }
+
     return 0;
 }
 
