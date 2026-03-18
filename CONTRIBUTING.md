@@ -1,0 +1,71 @@
+# Contributing
+
+## Architecture
+
+```
+remkit-inspect.m   Runtime introspection tool — dumps ObjC properties/methods
+        |
+        v  (stdout: property list)
+generate-cli.py    Code generator — reads config dicts, emits Objective-C
+        |
+        v  (stdout: generated source)
+reminderkit.m      CLI source — wraps Apple's private ReminderKit framework
+        |
+        v  (clang)
+reminderkit        Final binary
+```
+
+`remkit-inspect.m` discovers available properties and methods on `REMReminder` and related classes at runtime. Its output feeds into `generate-cli.py`, which uses configuration dictionaries (`REMINDER_READ_PROPS`, `REMINDER_WRITE_OPS`, `SPECIAL_WRITE_OPS`) to produce `reminderkit.m`.
+
+**Note:** `reminderkit.m` was originally fully generated but is now maintained manually. The generator still produces a working scaffold, but hand-written features (normalized quote matching, `linkedNoteId` extraction, note linking) live only in `reminderkit.m`. Running `make generate` will overwrite these additions.
+
+## Building
+
+```bash
+make              # build reminderkit binary
+make clean        # remove build artifacts
+```
+
+## Discovering new properties
+
+```bash
+make remkit-inspect
+./remkit-inspect 2>&1 | less
+```
+
+This dumps all Objective-C properties and methods on `REMReminder`, `REMReminderChangeItem`, and related classes. Use this to find new properties to expose.
+
+## Adding a new read property
+
+1. Add an entry to `REMINDER_READ_PROPS` in `generate-cli.py`:
+   ```python
+   "objcPropertyName": ("jsonKey", "type_hint"),
+   ```
+2. Type hints: `"string"`, `"bool"`, `"bool_getter"`, `"int"`, `"uint"`, `"date"`, `"datecomps"`, `"objid"`, `"set_hashtags"`
+3. Add the corresponding read logic to `reminderToDict` in `reminderkit.m`
+4. Rebuild: `make`
+
+## Adding a new write operation (setter)
+
+1. Add an entry to `REMINDER_WRITE_OPS` in `generate-cli.py`:
+   ```python
+   "cli-flag": ("setterSelector:", "arg_type"),
+   ```
+2. Arg types: `"string"`, `"bool"`, `"int"`, `"uint"`, `"datecomps"`, `"url"`
+3. For no-arg methods (like `removeFromParentReminder`), add to `SPECIAL_WRITE_OPS` instead
+4. Add the corresponding setter logic to `cmdUpdate` in `reminderkit.m`
+5. Rebuild: `make`
+
+## Running tests
+
+```bash
+make && ./reminderkit test
+```
+
+Tests create a temporary list (`__remcli_test_list__`) in Apple Reminders, exercise all commands, and clean up. They run against the real Reminders store — no mocks.
+
+## Adding a test
+
+Tests are numbered sequentially in the `cmdTest` function in `reminderkit.m`. Add new tests before the cleanup section (the `cmdDelete child` / `cmdDelete parent` / `cmdDeleteList` tests at the end).
+
+Update the corresponding test block in `generate-cli.py` if the test covers generator-produced functionality.
