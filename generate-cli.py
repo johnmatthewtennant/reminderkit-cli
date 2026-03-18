@@ -275,6 +275,24 @@ static id findReminderByID(id store, NSString *idString) {
     }
     return nil;
 }
+
+static id requireUniqueReminder(id store, NSString *title, NSString *listName) {
+    NSArray *matches = findReminders(store, title, listName);
+    if (matches.count == 0) {
+        errorExit([NSString stringWithFormat:@"Reminder not found: %@", title]);
+    }
+    if (matches.count > 1) {
+        NSMutableString *msg = [NSMutableString stringWithFormat:@"Multiple reminders match '%@'. Use --id to specify:\\n", title];
+        for (id rem in matches) {
+            NSString *t = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("titleAsString"));
+            id objID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));
+            NSString *idStr = objectIDToString(objID);
+            [msg appendFormat:@"  - \\"%@\\" (id: %@)\\n", t, idStr];
+        }
+        errorExit(msg);
+    }
+    return matches[0];
+}
 '''
 
 
@@ -428,8 +446,7 @@ static int cmdGet(id store, NSString *title, NSString *listName) {
 }
 
 static int cmdSubtasks(id store, NSString *title, NSString *listName) {
-    id rem = findReminder(store, title, listName);
-    if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found: %@", title]);
+    id rem = requireUniqueReminder(store, title, listName);
 
     id parentObjID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));
     NSString *parentIDStr = objectIDToString(parentObjID);
