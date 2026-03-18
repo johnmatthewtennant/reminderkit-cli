@@ -296,7 +296,21 @@ static NSDictionary *reminderToDict(id rem) {
             NSArray *urlAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("urlAttachments"));
             if (urlAtts.count > 0) {
                 NSURL *attUrl = ((id (*)(id, SEL))objc_msgSend)(urlAtts[0], sel_registerName("url"));
-                if (attUrl) dict[@"url"] = [attUrl absoluteString];
+                if (attUrl) {
+                    dict[@"url"] = [attUrl absoluteString];
+                    // Detect applenotes:// note links and extract note ID
+                    if ([[attUrl scheme] isEqualToString:@"applenotes"]
+                        && [[attUrl host] isEqualToString:@"showNote"]) {
+                        NSURLComponents *comps = [NSURLComponents componentsWithURL:attUrl
+                            resolvingAgainstBaseURL:NO];
+                        for (NSURLQueryItem *item in comps.queryItems) {
+                            if ([item.name isEqualToString:@"identifier"] && item.value.length > 0) {
+                                dict[@"linkedNoteId"] = item.value;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
     } @catch (NSException *e) {}
@@ -956,6 +970,11 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
     id rem = findReminderByID(store, remID);
     if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", remID]);
 
+    // Validate conflicting URL flags
+    if (opts[@"url"] && opts[@"clear-url"]) {
+        errorExit(@"Cannot use --url and --clear-url together");
+    }
+
     // Validate conflicting parent flags
     NSString *parentID = opts[@"parent-id"];
     BOOL removeParent = opts[@"remove-parent"] != nil;
@@ -1010,6 +1029,10 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
             id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext"));
             ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), url);
         }
+    }
+    if (opts[@"clear-url"]) {
+        id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext"));
+        ((void (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("removeURLAttachments"));
     }
     if (opts[@"remove-parent"]) {
         ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromParentReminder"));
@@ -1068,6 +1091,22 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
     if (updated) printJSON(reminderToDict(updated));
     else fprintf(stderr, "Updated successfully\n");
     return 0;
+}
+
+
+static int cmdLinkNote(id store, NSString *remId, NSString *noteId) {
+    // Construct the applenotes:// URL using NSURLComponents for proper encoding
+    NSURLComponents *comps = [[NSURLComponents alloc] init];
+    comps.scheme = @"applenotes";
+    comps.host = @"showNote";
+    comps.queryItems = @[
+        [NSURLQueryItem queryItemWithName:@"identifier" value:noteId]
+    ];
+    NSString *urlStr = [comps string];
+    if (!urlStr) errorExit(@"Failed to construct note URL from note-id");
+
+    // Delegate to cmdUpdate with the constructed URL
+    return cmdUpdate(store, nil, @{@"id": remId, @"url": urlStr});
 }
 
 
@@ -1138,7 +1177,7 @@ static int cmdBatch(id store) {
     NSSet *validOps = [NSSet setWithArray:@[@"add", @"complete", @"update", @"delete"]];
     NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
         @"notes", @"priority", @"flagged", @"completed",
-        @"due-date", @"start-date", @"url", @"remove-parent", @"remove-from-list",
+        @"due-date", @"start-date", @"url", @"clear-url", @"remove-parent", @"remove-from-list",
         @"parent-id", @"to-list"]];
 
     // Validate all operations first
@@ -1249,6 +1288,10 @@ static int cmdBatch(id store) {
                 [results addObject:@{@"op": @"delete", @"id": remIDStr ?: @"", @"status": @"ok"}];
 
             } else if ([opType isEqualToString:@"update"]) {
+                BOOL clearUrl = [op[@"clear-url"] boolValue];
+                if (op[@"url"] && clearUrl) {
+                    errorExit(@"Cannot use 'url' and 'clear-url' together in batch update");
+                }
                 if (op[@"title"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setTitleAsString:"), op[@"title"]);
                 if (op[@"notes"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setNotesAsString:"), op[@"notes"]);
                 if (op[@"priority"]) ((void (*)(id, SEL, NSUInteger))objc_msgSend)(changeItem, sel_registerName("setPriority:"), [op[@"priority"] integerValue]);
@@ -1260,6 +1303,7 @@ static int cmdBatch(id store) {
                 if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
                 if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
                 if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext")); ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), u); } }
+                if (clearUrl) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext")); ((void (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("removeURLAttachments")); }
                 if (op[@"remove-parent"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromParentReminder"));
                 if (op[@"remove-from-list"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));
                 [results addObject:@{@"op": @"update", @"id": remIDStr ?: @"", @"status": @"ok"}];
@@ -1597,27 +1641,195 @@ static int cmdTest(id store) {
         cmdDeleteList(store, curlyListName26);
     }
 
-    // Cleanup
-    // Test 27: cmdDelete child
-    fprintf(stderr, "Test 27: cmdDelete child...\n");
+    // --- Note linking tests ---
+
+    // Test 23: Create reminder with applenotes:// URL, verify linkedNoteId
+    fprintf(stderr, "Test 23: Add with applenotes:// URL...\n");
     {
-        id rem27 = findReminder(store, childTitle, testListName);
+        NSString *noteTitle23 = @"__remcli_test_note_url__";
+        int r = cmdAdd(store, noteTitle23, testListName, @{@"url": @"applenotes://showNote?identifier=FAKE-NOTE-ID"});
+        if (r == 0) {
+            id rem = findReminder(store, noteTitle23, testListName);
+            NSDictionary *dict = reminderToDict(rem);
+            if ([dict[@"url"] isEqualToString:@"applenotes://showNote?identifier=FAKE-NOTE-ID"]
+                && [dict[@"linkedNoteId"] isEqualToString:@"FAKE-NOTE-ID"]) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (url=%s, linkedNoteId=%s)\n", [dict[@"url"] UTF8String], [dict[@"linkedNoteId"] UTF8String]); failed++; }
+        } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
+    }
+
+    // Test 24: Update reminder with different note URL
+    fprintf(stderr, "Test 24: Update with applenotes:// URL...\n");
+    {
+        id rem24 = findReminder(store, @"__remcli_test_note_url__", testListName);
+        NSString *rem24ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem24, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem24ID, @"url": @"applenotes://showNote?identifier=OTHER-NOTE-ID"});
+        if (r == 0) {
+            id updated = findReminderByID(store, rem24ID);
+            NSDictionary *dict = reminderToDict(updated);
+            if ([dict[@"linkedNoteId"] isEqualToString:@"OTHER-NOTE-ID"]) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (linkedNoteId=%s)\n", [dict[@"linkedNoteId"] UTF8String]); failed++; }
+        } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 25: link-note command
+    fprintf(stderr, "Test 25: link-note command...\n");
+    {
+        id rem25 = findReminder(store, @"__remcli_test_note_url__", testListName);
+        NSString *rem25ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem25, sel_registerName("objectID")));
+        int r = cmdLinkNote(store, rem25ID, @"YET-ANOTHER-ID");
+        if (r == 0) {
+            id updated = findReminderByID(store, rem25ID);
+            NSDictionary *dict = reminderToDict(updated);
+            if ([dict[@"url"] isEqualToString:@"applenotes://showNote?identifier=YET-ANOTHER-ID"]
+                && [dict[@"linkedNoteId"] isEqualToString:@"YET-ANOTHER-ID"]) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (url=%s, linkedNoteId=%s)\n", [dict[@"url"] UTF8String], [dict[@"linkedNoteId"] UTF8String]); failed++; }
+        } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 26: clear-url removes URL and linkedNoteId
+    fprintf(stderr, "Test 26: --clear-url...\n");
+    {
+        id rem26 = findReminder(store, @"__remcli_test_note_url__", testListName);
+        NSString *rem26ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem26, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem26ID, @"clear-url": @"true"});
+        if (r == 0) {
+            id updated = findReminderByID(store, rem26ID);
+            NSDictionary *dict = reminderToDict(updated);
+            if (dict[@"url"] == nil && dict[@"linkedNoteId"] == nil) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (url=%s, linkedNoteId=%s)\n", [dict[@"url"] UTF8String], [dict[@"linkedNoteId"] UTF8String]); failed++; }
+        } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 27: Non-note URL should not have linkedNoteId
+    fprintf(stderr, "Test 27: Non-note URL has no linkedNoteId...\n");
+    {
+        id rem27 = findReminder(store, @"__remcli_test_note_url__", testListName);
         NSString *rem27ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem27, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem27ID);
-        if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
+        int r = cmdUpdate(store, testListName, @{@"id": rem27ID, @"url": @"https://example.com"});
+        if (r == 0) {
+            id updated = findReminderByID(store, rem27ID);
+            NSDictionary *dict = reminderToDict(updated);
+            if (dict[@"url"] != nil && dict[@"linkedNoteId"] == nil) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (url=%s, linkedNoteId=%s)\n", [dict[@"url"] UTF8String], [dict[@"linkedNoteId"] UTF8String]); failed++; }
+        } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 28: cmdDelete parent
-    fprintf(stderr, "Test 28: cmdDelete parent...\n");
+    // Test 28: Malformed applenotes:// URL (not showNote) has no linkedNoteId
+    fprintf(stderr, "Test 28: Malformed applenotes:// URL...\n");
     {
-        id rem28 = findReminder(store, parentTitle, testListName);
+        id rem28 = findReminder(store, @"__remcli_test_note_url__", testListName);
         NSString *rem28ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem28, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem28ID);
+        int r = cmdUpdate(store, testListName, @{@"id": rem28ID, @"url": @"applenotes://other?foo=bar"});
+        if (r == 0) {
+            id updated = findReminderByID(store, rem28ID);
+            NSDictionary *dict = reminderToDict(updated);
+            if (dict[@"url"] != nil && dict[@"linkedNoteId"] == nil) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (linkedNoteId should be nil)\n"); failed++; }
+        } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 29: applenotes:// URL without identifier param has no linkedNoteId
+    fprintf(stderr, "Test 29: applenotes://showNote without identifier...\n");
+    {
+        id rem29 = findReminder(store, @"__remcli_test_note_url__", testListName);
+        NSString *rem29ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem29, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem29ID, @"url": @"applenotes://showNote"});
+        if (r == 0) {
+            id updated = findReminderByID(store, rem29ID);
+            NSDictionary *dict = reminderToDict(updated);
+            if (dict[@"url"] != nil && dict[@"linkedNoteId"] == nil) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (linkedNoteId should be nil)\n"); failed++; }
+        } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 30: --url and --clear-url together (conflict, subprocess)
+    fprintf(stderr, "Test 30: --url and --clear-url conflict...\n");
+    {
+        char exePath[PATH_MAX];
+        uint32_t exeSize = sizeof(exePath);
+        _NSGetExecutablePath(exePath, &exeSize);
+        realpath(exePath, exePath);
+        NSString *quotedExe = [NSString stringWithFormat:@"'%s'",
+            [[[NSString stringWithUTF8String:exePath]
+              stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]
+             UTF8String]];
+        NSString *cmd30 = [NSString stringWithFormat:@"%@ update --id VALID --url 'https://x.com' --clear-url 2>/dev/null", quotedExe];
+        int r = system([cmd30 UTF8String]);
+        if (r != 0) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL (should have errored)\n"); failed++; }
+    }
+
+    // Test 31: link-note missing --note-id (subprocess)
+    fprintf(stderr, "Test 31: link-note missing --note-id...\n");
+    {
+        char exePath[PATH_MAX];
+        uint32_t exeSize = sizeof(exePath);
+        _NSGetExecutablePath(exePath, &exeSize);
+        realpath(exePath, exePath);
+        NSString *quotedExe = [NSString stringWithFormat:@"'%s'",
+            [[[NSString stringWithUTF8String:exePath]
+              stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]
+             UTF8String]];
+        NSString *cmd31 = [NSString stringWithFormat:@"%@ link-note --id VALID 2>/dev/null", quotedExe];
+        int r = system([cmd31 UTF8String]);
+        if (r != 0) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL (should have errored)\n"); failed++; }
+    }
+
+    // Test 32: link-note missing --id (subprocess)
+    fprintf(stderr, "Test 32: link-note missing --id...\n");
+    {
+        char exePath[PATH_MAX];
+        uint32_t exeSize = sizeof(exePath);
+        _NSGetExecutablePath(exePath, &exeSize);
+        realpath(exePath, exePath);
+        NSString *quotedExe = [NSString stringWithFormat:@"'%s'",
+            [[[NSString stringWithUTF8String:exePath]
+              stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]
+             UTF8String]];
+        NSString *cmd32 = [NSString stringWithFormat:@"%@ link-note --note-id FAKE 2>/dev/null", quotedExe];
+        int r = system([cmd32 UTF8String]);
+        if (r != 0) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL (should have errored)\n"); failed++; }
+    }
+
+    // Clean up note test reminder
+    {
+        id remClean = findReminder(store, @"__remcli_test_note_url__", testListName);
+        if (remClean) {
+            NSString *remCleanID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(remClean, sel_registerName("objectID")));
+            cmdDelete(store, testListName, remCleanID);
+        }
+    }
+
+    // Cleanup
+    // Test 33: cmdDelete child
+    fprintf(stderr, "Test 33: cmdDelete child...\n");
+    {
+        id rem33 = findReminder(store, childTitle, testListName);
+        NSString *rem33ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem33, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem33ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 29: cmdDeleteList
-    fprintf(stderr, "Test 29: cmdDeleteList...\n");
+    // Test 34: cmdDelete parent
+    fprintf(stderr, "Test 34: cmdDelete parent...\n");
+    {
+        id rem34 = findReminder(store, parentTitle, testListName);
+        NSString *rem34ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem34, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem34ID);
+        if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 35: cmdDeleteList
+    fprintf(stderr, "Test 35: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
@@ -1734,7 +1946,8 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit get --title <title> [--list <name>]\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
-    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
+    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
+    fprintf(stderr, "  reminderkit link-note --id <id> --note-id <note-identifier>\n");
     fprintf(stderr, "  reminderkit complete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\n");
@@ -1774,6 +1987,7 @@ int main(int argc, const char *argv[]) {
                 if ([flag isEqualToString:@"include-completed"] ||
                     [flag isEqualToString:@"remove-parent"] ||
                     [flag isEqualToString:@"remove-from-list"] ||
+                    [flag isEqualToString:@"clear-url"] ||
                     [flag isEqualToString:@"help"] ||
                     [flag isEqualToString:@"claude"] ||
                     [flag isEqualToString:@"agents"] ||
@@ -1836,6 +2050,11 @@ int main(int argc, const char *argv[]) {
         } else if ([command isEqualToString:@"update"]) {
             if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
             return cmdUpdate(store, listName, opts);
+
+        } else if ([command isEqualToString:@"link-note"]) {
+            if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: link-note requires --id\n"); usage(); return 1; }
+            if (!opts[@"note-id"] || [opts[@"note-id"] length] == 0) { fprintf(stderr, "Error: link-note requires --note-id\n"); usage(); return 1; }
+            return cmdLinkNote(store, opts[@"id"], opts[@"note-id"]);
 
         } else if ([command isEqualToString:@"complete"]) {
             if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
