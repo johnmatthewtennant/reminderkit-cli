@@ -1155,21 +1155,6 @@ static int cmdDelete(id store, NSString *listName, NSString *remID) {
 }
 
 
-// --- Link Note Command ---
-
-static int cmdLinkNote(id store, NSString *remId, NSString *noteId) {
-    // Construct applenotes:// URL
-    NSURLComponents *comps = [[NSURLComponents alloc] init];
-    comps.scheme = @"applenotes";
-    comps.host = @"showNote";
-    comps.queryItems = @[[NSURLQueryItem queryItemWithName:@"identifier" value:noteId]];
-    NSString *urlStr = [comps string];
-
-    // Delegate to cmdUpdate with the constructed URL
-    return cmdUpdate(store, nil, @{@"id": remId, @"url": urlStr});
-}
-
-
 // --- Batch Command ---
 
 static int cmdBatch(id store) {
