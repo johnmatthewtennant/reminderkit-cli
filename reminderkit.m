@@ -72,6 +72,13 @@ static NSDateComponents *stringToDateComps(NSString *str) {
     return comps;
 }
 
+static NSString *normalizeQuotes(NSString *str) {
+    if (!str) return nil;
+    NSString *result = [str stringByReplacingOccurrencesOfString:@"\u2018" withString:@"'"];
+    result = [result stringByReplacingOccurrencesOfString:@"\u2019" withString:@"'"];
+    return result;
+}
+
 static void printJSON(id obj) {
     NSError *error = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
@@ -106,10 +113,18 @@ static NSArray *fetchLists(id store) {
 
 static id findList(id store, NSString *name) {
     NSArray *lists = fetchLists(store);
+    // Pass 1: exact match
     for (id list in lists) {
         id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
         NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
         if ([listName isEqualToString:name]) return list;
+    }
+    // Pass 2: normalized fallback (curly apostrophes -> straight)
+    NSString *normalizedName = normalizeQuotes(name);
+    for (id list in lists) {
+        id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+        NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
+        if ([normalizeQuotes(listName) isEqualToString:normalizedName]) return list;
     }
     return nil;
 }
@@ -139,11 +154,21 @@ static id findReminder(id store, NSString *title, NSString *listName) {
     } else {
         lists = fetchLists(store);
     }
+    // Pass 1: exact match
     for (id list in lists) {
         NSArray *rems = fetchReminders(store, list, YES);
         for (id rem in rems) {
             NSString *t = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("titleAsString"));
             if ([t isEqualToString:title]) return rem;
+        }
+    }
+    // Pass 2: normalized fallback (curly apostrophes -> straight)
+    NSString *normalizedTitle = normalizeQuotes(title);
+    for (id list in lists) {
+        NSArray *rems = fetchReminders(store, list, YES);
+        for (id rem in rems) {
+            NSString *t = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("titleAsString"));
+            if ([normalizeQuotes(t) isEqualToString:normalizedTitle]) return rem;
         }
     }
     return nil;
@@ -288,6 +313,261 @@ static NSDictionary *reminderToDict(id rem) {
                 }
             }
         }
+    } @catch (NSException *e) {}
+
+    // --- Newly exposed properties ---
+
+    // recurrenceRules
+    @try {
+        NSArray *rules = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("recurrenceRules"));
+        if (rules && rules.count > 0) {
+            NSMutableArray *rulesArr = [NSMutableArray array];
+            for (id rule in rules) {
+                NSMutableDictionary *ruleDict = [NSMutableDictionary dictionary];
+                @try {
+                    long long freq = ((long long (*)(id, SEL))objc_msgSend)(rule, sel_registerName("frequency"));
+                    // frequency: 0=daily, 1=weekly, 2=monthly, 3=yearly
+                    NSArray *freqNames = @[@"daily", @"weekly", @"monthly", @"yearly"];
+                    if (freq >= 0 && freq < (long long)freqNames.count) {
+                        ruleDict[@"frequency"] = freqNames[freq];
+                    } else {
+                        ruleDict[@"frequency"] = @(freq);
+                    }
+                } @catch (NSException *e) {}
+                @try {
+                    long long interval = ((long long (*)(id, SEL))objc_msgSend)(rule, sel_registerName("interval"));
+                    ruleDict[@"interval"] = @(interval);
+                } @catch (NSException *e) {}
+                @try {
+                    NSArray *daysOfWeek = ((id (*)(id, SEL))objc_msgSend)(rule, sel_registerName("daysOfTheWeek"));
+                    if (daysOfWeek && daysOfWeek.count > 0) {
+                        NSMutableArray *days = [NSMutableArray array];
+                        for (id day in daysOfWeek) {
+                            NSMutableDictionary *dayDict = [NSMutableDictionary dictionary];
+                            @try {
+                                long long weekday = ((long long (*)(id, SEL))objc_msgSend)(day, sel_registerName("dayOfTheWeek"));
+                                // EKWeekday: 1=Sunday, 2=Monday, ..., 7=Saturday
+                                dayDict[@"dayOfTheWeek"] = @(weekday);
+                            } @catch (NSException *e) {}
+                            @try {
+                                long long weekNum = ((long long (*)(id, SEL))objc_msgSend)(day, sel_registerName("weekNumber"));
+                                if (weekNum != 0) dayDict[@"weekNumber"] = @(weekNum);
+                            } @catch (NSException *e) {}
+                            if (dayDict.count > 0) [days addObject:dayDict];
+                        }
+                        if (days.count > 0) ruleDict[@"daysOfTheWeek"] = days;
+                    }
+                } @catch (NSException *e) {}
+                @try {
+                    NSArray *daysOfMonth = ((id (*)(id, SEL))objc_msgSend)(rule, sel_registerName("daysOfTheMonth"));
+                    if (daysOfMonth && daysOfMonth.count > 0) ruleDict[@"daysOfTheMonth"] = daysOfMonth;
+                } @catch (NSException *e) {}
+                @try {
+                    NSArray *daysOfYear = ((id (*)(id, SEL))objc_msgSend)(rule, sel_registerName("daysOfTheYear"));
+                    if (daysOfYear && daysOfYear.count > 0) ruleDict[@"daysOfTheYear"] = daysOfYear;
+                } @catch (NSException *e) {}
+                @try {
+                    NSArray *weeksOfYear = ((id (*)(id, SEL))objc_msgSend)(rule, sel_registerName("weeksOfTheYear"));
+                    if (weeksOfYear && weeksOfYear.count > 0) ruleDict[@"weeksOfTheYear"] = weeksOfYear;
+                } @catch (NSException *e) {}
+                @try {
+                    NSArray *monthsOfYear = ((id (*)(id, SEL))objc_msgSend)(rule, sel_registerName("monthsOfTheYear"));
+                    if (monthsOfYear && monthsOfYear.count > 0) ruleDict[@"monthsOfTheYear"] = monthsOfYear;
+                } @catch (NSException *e) {}
+                @try {
+                    NSArray *setPositions = ((id (*)(id, SEL))objc_msgSend)(rule, sel_registerName("setPositions"));
+                    if (setPositions && setPositions.count > 0) ruleDict[@"setPositions"] = setPositions;
+                } @catch (NSException *e) {}
+                @try {
+                    id recEnd = ((id (*)(id, SEL))objc_msgSend)(rule, sel_registerName("recurrenceEnd"));
+                    if (recEnd) {
+                        NSMutableDictionary *endDict = [NSMutableDictionary dictionary];
+                        @try {
+                            NSDate *endDate = ((id (*)(id, SEL))objc_msgSend)(recEnd, sel_registerName("endDate"));
+                            if (endDate) endDict[@"endDate"] = dateToISO(endDate);
+                        } @catch (NSException *e) {}
+                        @try {
+                            NSUInteger count = ((NSUInteger (*)(id, SEL))objc_msgSend)(recEnd, sel_registerName("occurrenceCount"));
+                            if (count > 0) endDict[@"occurrenceCount"] = @(count);
+                        } @catch (NSException *e) {}
+                        if (endDict.count > 0) ruleDict[@"recurrenceEnd"] = endDict;
+                    }
+                } @catch (NSException *e) {}
+                if (ruleDict.count > 0) [rulesArr addObject:ruleDict];
+            }
+            if (rulesArr.count > 0) dict[@"recurrenceRules"] = rulesArr;
+        }
+    } @catch (NSException *e) {}
+
+    // alarms
+    @try {
+        NSArray *alarms = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("alarms"));
+        if (alarms && alarms.count > 0) {
+            NSMutableArray *alarmsArr = [NSMutableArray array];
+            for (id alarm in alarms) {
+                NSMutableDictionary *alarmDict = [NSMutableDictionary dictionary];
+                @try {
+                    NSString *uid = ((id (*)(id, SEL))objc_msgSend)(alarm, sel_registerName("alarmUID"));
+                    if (uid) alarmDict[@"uid"] = uid;
+                } @catch (NSException *e) {}
+                @try {
+                    NSDate *ackDate = ((id (*)(id, SEL))objc_msgSend)(alarm, sel_registerName("acknowledgedDate"));
+                    if (ackDate) alarmDict[@"acknowledgedDate"] = dateToISO(ackDate);
+                } @catch (NSException *e) {}
+                @try {
+                    id trigger = ((id (*)(id, SEL))objc_msgSend)(alarm, sel_registerName("trigger"));
+                    if (trigger) {
+                        BOOL isTemporal = ((BOOL (*)(id, SEL))objc_msgSend)(trigger, sel_registerName("isTemporal"));
+                        if (isTemporal) {
+                            alarmDict[@"type"] = @"date";
+                            @try {
+                                NSDateComponents *comps = ((id (*)(id, SEL))objc_msgSend)(trigger, sel_registerName("dateComponents"));
+                                if (comps) alarmDict[@"date"] = dateCompsToString(comps);
+                            } @catch (NSException *e) {}
+                        } else {
+                            alarmDict[@"type"] = @"location";
+                            @try {
+                                id loc = ((id (*)(id, SEL))objc_msgSend)(trigger, sel_registerName("structuredLocation"));
+                                if (loc) {
+                                    NSMutableDictionary *locDict = [NSMutableDictionary dictionary];
+                                    @try {
+                                        NSString *title = ((id (*)(id, SEL))objc_msgSend)(loc, sel_registerName("title"));
+                                        if (title) locDict[@"title"] = title;
+                                    } @catch (NSException *e) {}
+                                    @try {
+                                        double lat = ((double (*)(id, SEL))objc_msgSend)(loc, sel_registerName("latitude"));
+                                        double lon = ((double (*)(id, SEL))objc_msgSend)(loc, sel_registerName("longitude"));
+                                        locDict[@"latitude"] = @(lat);
+                                        locDict[@"longitude"] = @(lon);
+                                    } @catch (NSException *e) {}
+                                    @try {
+                                        double radius = ((double (*)(id, SEL))objc_msgSend)(loc, sel_registerName("radius"));
+                                        if (radius > 0) locDict[@"radius"] = @(radius);
+                                    } @catch (NSException *e) {}
+                                    @try {
+                                        NSString *address = ((id (*)(id, SEL))objc_msgSend)(loc, sel_registerName("address"));
+                                        if (address) locDict[@"address"] = address;
+                                    } @catch (NSException *e) {}
+                                    alarmDict[@"location"] = locDict;
+                                }
+                            } @catch (NSException *e) {}
+                            @try {
+                                long long prox = ((long long (*)(id, SEL))objc_msgSend)(trigger, sel_registerName("proximity"));
+                                // proximity: 1=enter, 2=leave
+                                if (prox == 1) alarmDict[@"proximity"] = @"enter";
+                                else if (prox == 2) alarmDict[@"proximity"] = @"leave";
+                                else alarmDict[@"proximity"] = @(prox);
+                            } @catch (NSException *e) {}
+                        }
+                    }
+                } @catch (NSException *e) {}
+                if (alarmDict.count > 0) [alarmsArr addObject:alarmDict];
+            }
+            if (alarmsArr.count > 0) dict[@"alarms"] = alarmsArr;
+        }
+    } @catch (NSException *e) {}
+
+    // attachments (file and image — URL attachments already exposed as "url" above)
+    @try {
+        id attCtx2 = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("attachmentContext"));
+        if (attCtx2) {
+            NSMutableArray *fileAttsArr = [NSMutableArray array];
+            @try {
+                NSArray *fileAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx2, sel_registerName("fileAttachments"));
+                for (id att in fileAtts) {
+                    NSMutableDictionary *attDict = [NSMutableDictionary dictionary];
+                    attDict[@"type"] = @"file";
+                    @try {
+                        NSURL *fileURL = ((id (*)(id, SEL))objc_msgSend)(att, sel_registerName("fileURL"));
+                        if (fileURL) attDict[@"fileURL"] = [fileURL absoluteString];
+                    } @catch (NSException *e) {}
+                    @try {
+                        NSUInteger fileSize = ((NSUInteger (*)(id, SEL))objc_msgSend)(att, sel_registerName("fileSize"));
+                        attDict[@"fileSize"] = @(fileSize);
+                    } @catch (NSException *e) {}
+                    @try {
+                        NSString *uti = ((id (*)(id, SEL))objc_msgSend)(att, sel_registerName("uti"));
+                        if (uti) attDict[@"uti"] = uti;
+                    } @catch (NSException *e) {}
+                    [fileAttsArr addObject:attDict];
+                }
+            } @catch (NSException *e) {}
+            @try {
+                NSArray *imgAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx2, sel_registerName("imageAttachments"));
+                for (id att in imgAtts) {
+                    NSMutableDictionary *attDict = [NSMutableDictionary dictionary];
+                    attDict[@"type"] = @"image";
+                    @try {
+                        NSUInteger w = ((NSUInteger (*)(id, SEL))objc_msgSend)(att, sel_registerName("width"));
+                        NSUInteger h = ((NSUInteger (*)(id, SEL))objc_msgSend)(att, sel_registerName("height"));
+                        attDict[@"width"] = @(w);
+                        attDict[@"height"] = @(h);
+                    } @catch (NSException *e) {}
+                    @try {
+                        NSString *uti = ((id (*)(id, SEL))objc_msgSend)(att, sel_registerName("uti"));
+                        if (uti) attDict[@"uti"] = uti;
+                    } @catch (NSException *e) {}
+                    [fileAttsArr addObject:attDict];
+                }
+            } @catch (NSException *e) {}
+            if (fileAttsArr.count > 0) dict[@"attachments"] = fileAttsArr;
+        }
+    } @catch (NSException *e) {}
+
+    // assignments
+    @try {
+        NSSet *assignments = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("assignments"));
+        if (assignments && assignments.count > 0) {
+            NSMutableArray *assignArr = [NSMutableArray array];
+            for (id assignment in assignments) {
+                NSMutableDictionary *aDict = [NSMutableDictionary dictionary];
+                @try {
+                    id assigneeID = ((id (*)(id, SEL))objc_msgSend)(assignment, sel_registerName("assigneeID"));
+                    if (assigneeID) aDict[@"assigneeID"] = objectIDToString(assigneeID);
+                } @catch (NSException *e) {}
+                @try {
+                    id originatorID = ((id (*)(id, SEL))objc_msgSend)(assignment, sel_registerName("originatorID"));
+                    if (originatorID) aDict[@"originatorID"] = objectIDToString(originatorID);
+                } @catch (NSException *e) {}
+                @try {
+                    long long status = ((long long (*)(id, SEL))objc_msgSend)(assignment, sel_registerName("status"));
+                    aDict[@"status"] = @(status);
+                } @catch (NSException *e) {}
+                @try {
+                    NSDate *assignedDate = ((id (*)(id, SEL))objc_msgSend)(assignment, sel_registerName("assignedDate"));
+                    if (assignedDate) aDict[@"assignedDate"] = dateToISO(assignedDate);
+                } @catch (NSException *e) {}
+                if (aDict.count > 0) [assignArr addObject:aDict];
+            }
+            if (assignArr.count > 0) dict[@"assignments"] = assignArr;
+        }
+    } @catch (NSException *e) {}
+
+    // displayDate
+    @try {
+        id dispDate = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("displayDate"));
+        if (dispDate) {
+            NSMutableDictionary *ddDict = [NSMutableDictionary dictionary];
+            @try {
+                NSDate *date = ((id (*)(id, SEL))objc_msgSend)(dispDate, sel_registerName("date"));
+                if (date) ddDict[@"date"] = dateToISO(date);
+            } @catch (NSException *e) {}
+            @try {
+                BOOL allDay = ((BOOL (*)(id, SEL))objc_msgSend)(dispDate, sel_registerName("isAllDay"));
+                ddDict[@"allDay"] = @(allDay);
+            } @catch (NSException *e) {}
+            @try {
+                NSTimeZone *tz = ((id (*)(id, SEL))objc_msgSend)(dispDate, sel_registerName("timeZone"));
+                if (tz) ddDict[@"timeZone"] = [tz name];
+            } @catch (NSException *e) {}
+            if (ddDict.count > 0) dict[@"displayDate"] = ddDict;
+        }
+    } @catch (NSException *e) {}
+
+    // icsDisplayOrder
+    @try {
+        NSUInteger order = ((NSUInteger (*)(id, SEL))objc_msgSend)(rem, sel_registerName("icsDisplayOrder"));
+        dict[@"icsDisplayOrder"] = @(order);
     } @catch (NSException *e) {}
 
     return dict;
@@ -1278,7 +1558,89 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
     }
 
-    // Cleanup
+    // Test 23: findReminder normalized fallback (curly apostrophe)
+    fprintf(stderr, "Test 23: findReminder normalized fallback...\n");
+    {
+        NSString *curlyTitle = @"Test\u2019s curly apostrophe";
+        NSString *straightTitle = @"Test's curly apostrophe";
+        int r = cmdAdd(store, curlyTitle, testListName, @{});
+        if (r == 0) {
+            id found = findReminder(store, straightTitle, testListName);
+            if (found) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (not found via normalized match)\n"); failed++; }
+            id rem23c = findReminder(store, curlyTitle, testListName);
+            if (rem23c) {
+                NSString *rem23cID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem23c, sel_registerName("objectID")));
+                cmdDelete(store, testListName, rem23cID);
+            }
+        } else { fprintf(stderr, "  FAIL (could not create reminder)\n"); failed++; }
+    }
+
+    // Test 24: findList normalized fallback (curly apostrophe)
+    fprintf(stderr, "Test 24: findList normalized fallback...\n");
+    {
+        NSString *curlyListName24 = @"__test_list\u2019s__";
+        NSString *straightListName24 = @"__test_list's__";
+        int r = cmdCreateList(store, curlyListName24);
+        if (r == 0) {
+            id found = findList(store, straightListName24);
+            if (found) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (not found via normalized match)\n"); failed++; }
+            cmdDeleteList(store, curlyListName24);
+        } else { fprintf(stderr, "  FAIL (could not create list)\n"); failed++; }
+    }
+
+    // Test 25: exact match takes priority -- reminder collision
+    fprintf(stderr, "Test 25: Exact match priority (reminder)...\n");
+    {
+        NSString *straightTitle25 = @"Bob's reminder";
+        NSString *curlyTitle25 = @"Bob\u2019s reminder";
+        int r1 = cmdAdd(store, straightTitle25, testListName, @{@"notes": @"straight"});
+        int r2 = cmdAdd(store, curlyTitle25, testListName, @{@"notes": @"curly"});
+        if (r1 == 0 && r2 == 0) {
+            id foundStraight = findReminder(store, straightTitle25, testListName);
+            NSString *notesStraight = foundStraight ? ((id (*)(id, SEL))objc_msgSend)(foundStraight, sel_registerName("notesAsString")) : nil;
+            id foundCurly = findReminder(store, curlyTitle25, testListName);
+            NSString *notesCurly = foundCurly ? ((id (*)(id, SEL))objc_msgSend)(foundCurly, sel_registerName("notesAsString")) : nil;
+            if ([notesStraight isEqualToString:@"straight"] && [notesCurly isEqualToString:@"curly"]) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else {
+                fprintf(stderr, "  FAIL (straight notes=%s, curly notes=%s)\n",
+                    [notesStraight UTF8String], [notesCurly UTF8String]); failed++;
+            }
+        } else { fprintf(stderr, "  FAIL (could not create reminders)\n"); failed++; }
+        id rem25a = findReminder(store, straightTitle25, testListName);
+        if (rem25a) { NSString *id25a = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem25a, sel_registerName("objectID"))); cmdDelete(store, testListName, id25a); }
+        id rem25b = findReminder(store, curlyTitle25, testListName);
+        if (rem25b) { NSString *id25b = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem25b, sel_registerName("objectID"))); cmdDelete(store, testListName, id25b); }
+    }
+
+    // Test 26: exact match takes priority -- list collision
+    fprintf(stderr, "Test 26: Exact match priority (list)...\n");
+    {
+        NSString *straightListName26 = @"__test Bob's List__";
+        NSString *curlyListName26 = @"__test Bob\u2019s List__";
+        int r1 = cmdCreateList(store, straightListName26);
+        int r2 = cmdCreateList(store, curlyListName26);
+        if (r1 == 0 && r2 == 0) {
+            id foundStraight = findList(store, straightListName26);
+            id foundCurly = findList(store, curlyListName26);
+            if (foundStraight && foundCurly) {
+                id straightStorage = ((id (*)(id, SEL))objc_msgSend)(foundStraight, sel_registerName("storage"));
+                NSString *straightName = ((id (*)(id, SEL))objc_msgSend)(straightStorage, sel_registerName("name"));
+                id curlyStorage = ((id (*)(id, SEL))objc_msgSend)(foundCurly, sel_registerName("storage"));
+                NSString *curlyName = ((id (*)(id, SEL))objc_msgSend)(curlyStorage, sel_registerName("name"));
+                if ([straightName isEqualToString:straightListName26] && [curlyName isEqualToString:curlyListName26]) {
+                    fprintf(stderr, "  PASS\n"); passed++;
+                } else { fprintf(stderr, "  FAIL (wrong list matched)\n"); failed++; }
+            } else { fprintf(stderr, "  FAIL (could not find lists)\n"); failed++; }
+        } else { fprintf(stderr, "  FAIL (could not create lists)\n"); failed++; }
+        cmdDeleteList(store, straightListName26);
+        cmdDeleteList(store, curlyListName26);
+    }
+
     // --- Note linking tests ---
 
     // Test 23: Create reminder with applenotes:// URL, verify linkedNoteId

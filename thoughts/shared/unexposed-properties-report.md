@@ -29,16 +29,16 @@ Session: c15d1124-70ee-4610-966c-00e94fd82278
 
 ## Available But Unexposed Properties on REMReminder
 
-### High Value — Worth Adding
+### High Value — IMPLEMENTED (read-only, exposed in reminderToDict)
 
-| Property | Type | Why |
-|----------|------|-----|
-| `recurrenceRules` | NSArray | Recurring reminders are common; users would want to read/set repeat rules |
-| `alarms` | NSArray | Alarm/notification settings — core reminder functionality |
-| `attachments` (file/image) | NSArray | Only URL attachments are exposed; file and image attachments are ignored |
-| `assignments` | NSSet | Shared reminder assignments — important for collaborative lists |
-| `displayDate` | REMDisplayDate | The effective date shown in the UI, may differ from dueDate |
-| `icsDisplayOrder` | NSUInteger | Sort order within a list — useful for maintaining custom ordering |
+| Property | Type | JSON key | Notes |
+|----------|------|----------|-------|
+| `recurrenceRules` | NSArray | `recurrenceRules` | Array of objects with frequency, interval, daysOfTheWeek, recurrenceEnd, etc. |
+| `alarms` | NSArray | `alarms` | Array of objects with type (date/location), date or location details, uid |
+| `attachments` (file/image) | NSArray | `attachments` | Array of file/image attachments (URL attachments remain in `url` field) |
+| `assignments` | NSSet | `assignments` | Array of objects with assigneeID, originatorID, status, assignedDate |
+| `displayDate` | REMDisplayDate | `displayDate` | Object with date, allDay, timeZone |
+| `icsDisplayOrder` | NSUInteger | `icsDisplayOrder` | Integer sort order within a list |
 
 ### Medium Value — Situationally Useful
 
