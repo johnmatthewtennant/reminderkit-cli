@@ -1349,15 +1349,15 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 1: cmdCreateList...\n");
     { int r = cmdCreateList(store, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; return 1; } }
 
-    // Test 2: cmdLists (call actual command, verify it returns without error)
+    // Test 2: cmdLists
     fprintf(stderr, "Test 2: cmdLists...\n");
     { int r = cmdLists(store); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 3: cmdAdd (create reminder with notes and priority)
+    // Test 3: cmdAdd
     fprintf(stderr, "Test 3: cmdAdd...\n");
     { int r = cmdAdd(store, parentTitle, testListName, @{@"notes": @"Test notes", @"priority": @"5"}); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 4: cmdGet (call actual command)
+    // Test 4: cmdGet
     fprintf(stderr, "Test 4: cmdGet...\n");
     { int r = cmdGet(store, parentTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
@@ -1392,7 +1392,7 @@ static int cmdTest(id store) {
         if (r2==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 8: cmdSubtasks (verify parent-child)
+    // Test 8: Verify parent-child
     fprintf(stderr, "Test 8: Verify parent-child...\n");
     {
         id child = findReminder(store, childTitle, testListName);
@@ -1413,7 +1413,7 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 10: Verify tag in reminderToDict
+    // Test 10: Verify tag
     fprintf(stderr, "Test 10: Verify tag...\n");
     {
         id rem = findReminder(store, parentTitle, testListName);
@@ -1432,7 +1432,7 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 12: cmdComplete (complete child)
+    // Test 12: cmdComplete
     fprintf(stderr, "Test 12: cmdComplete...\n");
     {
         id rem12 = findReminder(store, childTitle, testListName);
@@ -1441,11 +1441,11 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 13: cmdList (call actual command)
+    // Test 13: cmdList
     fprintf(stderr, "Test 13: cmdList...\n");
     { int r = cmdList(store, testListName, NO); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 14: Verify JSON shape from reminderToDict
+    // Test 14: JSON shape
     fprintf(stderr, "Test 14: JSON shape...\n");
     {
         id rem = findReminder(store, parentTitle, testListName);
@@ -1465,7 +1465,7 @@ static int cmdTest(id store) {
         }
     }
 
-    // Test 15: cmdUpdate --title (rename)
+    // Test 15: Rename via update
     fprintf(stderr, "Test 15: Rename via update...\n");
     {
         NSString *renamedTitle = @"__remcli_test_renamed__";
@@ -1475,7 +1475,6 @@ static int cmdTest(id store) {
         if (r == 0) {
             id found = findReminder(store, renamedTitle, testListName);
             if (found) {
-                // Rename back
                 cmdUpdate(store, testListName, @{@"id": rem15ID, @"title": parentTitle});
                 fprintf(stderr, "  PASS\n"); passed++;
             } else { fprintf(stderr, "  FAIL (not found after rename)\n"); failed++; }
@@ -1490,18 +1489,17 @@ static int cmdTest(id store) {
         if (r == 0) {
             id found = findList(store, renamedList);
             if (found) {
-                // Rename back
                 cmdRenameList(store, renamedList, testListName);
                 fprintf(stderr, "  PASS\n"); passed++;
             } else { fprintf(stderr, "  FAIL (not found after rename)\n"); failed++; }
         } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 17: cmdSubtasks (call actual command)
+    // Test 17: cmdSubtasks
     fprintf(stderr, "Test 17: cmdSubtasks...\n");
     { int r = cmdSubtasks(store, parentTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 18: Error path - find non-existent reminder
+    // Test 18: Error path (not found)
     fprintf(stderr, "Test 18: Error path (not found)...\n");
     {
         id notFound = findReminder(store, @"__nonexistent_reminder_999__", testListName);
@@ -1509,7 +1507,7 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (should be nil)\n"); failed++; }
     }
 
-    // Test 19: Error path - find non-existent list
+    // Test 19: Error path (list not found)
     fprintf(stderr, "Test 19: Error path (list not found)...\n");
     {
         id notFound = findList(store, @"__nonexistent_list_999__");
@@ -1517,7 +1515,7 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (should be nil)\n"); failed++; }
     }
 
-    // Test 20: cmdUpdate --append-notes
+    // Test 20: --append-notes
     fprintf(stderr, "Test 20: cmdUpdate --append-notes...\n");
     {
         id rem20 = findReminder(store, parentTitle, testListName);
@@ -1526,7 +1524,7 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 21: Verify --append-notes
+    // Test 21: Verify append-notes
     fprintf(stderr, "Test 21: Verify append-notes...\n");
     {
         id rem = findReminder(store, parentTitle, testListName);
@@ -1535,7 +1533,7 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (notes=%s)\n", [notes UTF8String]); failed++; }
     }
 
-    // Test 22: cmdAdd with --parent-id (create subtask in one step)
+    // Test 22: cmdAdd with --parent-id
     fprintf(stderr, "Test 22: cmdAdd with --parent-id...\n");
     {
         NSString *addParentChildTitle = @"__remcli_test_add_parent_child__";
@@ -1543,7 +1541,6 @@ static int cmdTest(id store) {
         NSString *parentID22 = objectIDToString(((id (*)(id, SEL))objc_msgSend)(parentRem22, sel_registerName("objectID")));
         int r = cmdAdd(store, addParentChildTitle, nil, @{@"parent-id": parentID22});
         if (r == 0) {
-            // Verify the child was created as a subtask of the parent
             id child22 = findReminder(store, addParentChildTitle, testListName);
             if (child22) {
                 id childPID22 = ((id (*)(id, SEL))objc_msgSend)(child22, sel_registerName("parentReminderID"));
@@ -1551,15 +1548,29 @@ static int cmdTest(id store) {
                 if (childPID22 && [objectIDToString(childPID22) isEqualToString:objectIDToString(parentOID22)]) {
                     fprintf(stderr, "  PASS\n"); passed++;
                 } else { fprintf(stderr, "  FAIL (not parented correctly)\n"); failed++; }
-                // Clean up the add-parent child
                 NSString *child22ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(child22, sel_registerName("objectID")));
                 cmdDelete(store, testListName, child22ID);
             } else { fprintf(stderr, "  FAIL (child not found in test list)\n"); failed++; }
         } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
     }
 
-    // Test 23: findReminder normalized fallback (curly apostrophe)
-    fprintf(stderr, "Test 23: findReminder normalized fallback...\n");
+    // Test 23: Parentheses in title
+    fprintf(stderr, "Test 23: Parentheses in title...\n");
+    {
+        NSString *parensTitle = @"__remcli_test_parens (hello)__";
+        int r = cmdAdd(store, parensTitle, testListName, @{});
+        if (r == 0) {
+            id found = findReminder(store, parensTitle, testListName);
+            if (found) {
+                fprintf(stderr, "  PASS\n"); passed++;
+                NSString *foundID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(found, sel_registerName("objectID")));
+                cmdDelete(store, testListName, foundID);
+            } else { fprintf(stderr, "  FAIL (not found after create)\n"); failed++; }
+        } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
+    }
+
+    // Test 24: findReminder normalized fallback (curly apostrophe)
+    fprintf(stderr, "Test 24: findReminder normalized fallback...\n");
     {
         NSString *curlyTitle = @"Test\u2019s curly apostrophe";
         NSString *straightTitle = @"Test's curly apostrophe";
@@ -1569,40 +1580,40 @@ static int cmdTest(id store) {
             if (found) {
                 fprintf(stderr, "  PASS\n"); passed++;
             } else { fprintf(stderr, "  FAIL (not found via normalized match)\n"); failed++; }
-            id rem23c = findReminder(store, curlyTitle, testListName);
-            if (rem23c) {
-                NSString *rem23cID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem23c, sel_registerName("objectID")));
-                cmdDelete(store, testListName, rem23cID);
+            id rem24c = findReminder(store, curlyTitle, testListName);
+            if (rem24c) {
+                NSString *rem24cID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem24c, sel_registerName("objectID")));
+                cmdDelete(store, testListName, rem24cID);
             }
         } else { fprintf(stderr, "  FAIL (could not create reminder)\n"); failed++; }
     }
 
-    // Test 24: findList normalized fallback (curly apostrophe)
-    fprintf(stderr, "Test 24: findList normalized fallback...\n");
+    // Test 25: findList normalized fallback (curly apostrophe)
+    fprintf(stderr, "Test 25: findList normalized fallback...\n");
     {
-        NSString *curlyListName24 = @"__test_list\u2019s__";
-        NSString *straightListName24 = @"__test_list's__";
-        int r = cmdCreateList(store, curlyListName24);
+        NSString *curlyListName25 = @"__test_list\u2019s__";
+        NSString *straightListName25 = @"__test_list's__";
+        int r = cmdCreateList(store, curlyListName25);
         if (r == 0) {
-            id found = findList(store, straightListName24);
+            id found = findList(store, straightListName25);
             if (found) {
                 fprintf(stderr, "  PASS\n"); passed++;
             } else { fprintf(stderr, "  FAIL (not found via normalized match)\n"); failed++; }
-            cmdDeleteList(store, curlyListName24);
+            cmdDeleteList(store, curlyListName25);
         } else { fprintf(stderr, "  FAIL (could not create list)\n"); failed++; }
     }
 
-    // Test 25: exact match takes priority -- reminder collision
-    fprintf(stderr, "Test 25: Exact match priority (reminder)...\n");
+    // Test 26: exact match takes priority -- reminder collision
+    fprintf(stderr, "Test 26: Exact match priority (reminder)...\n");
     {
-        NSString *straightTitle25 = @"Bob's reminder";
-        NSString *curlyTitle25 = @"Bob\u2019s reminder";
-        int r1 = cmdAdd(store, straightTitle25, testListName, @{@"notes": @"straight"});
-        int r2 = cmdAdd(store, curlyTitle25, testListName, @{@"notes": @"curly"});
+        NSString *straightTitle26 = @"Bob's reminder";
+        NSString *curlyTitle26 = @"Bob\u2019s reminder";
+        int r1 = cmdAdd(store, straightTitle26, testListName, @{@"notes": @"straight"});
+        int r2 = cmdAdd(store, curlyTitle26, testListName, @{@"notes": @"curly"});
         if (r1 == 0 && r2 == 0) {
-            id foundStraight = findReminder(store, straightTitle25, testListName);
+            id foundStraight = findReminder(store, straightTitle26, testListName);
             NSString *notesStraight = foundStraight ? ((id (*)(id, SEL))objc_msgSend)(foundStraight, sel_registerName("notesAsString")) : nil;
-            id foundCurly = findReminder(store, curlyTitle25, testListName);
+            id foundCurly = findReminder(store, curlyTitle26, testListName);
             NSString *notesCurly = foundCurly ? ((id (*)(id, SEL))objc_msgSend)(foundCurly, sel_registerName("notesAsString")) : nil;
             if ([notesStraight isEqualToString:@"straight"] && [notesCurly isEqualToString:@"curly"]) {
                 fprintf(stderr, "  PASS\n"); passed++;
@@ -1611,45 +1622,45 @@ static int cmdTest(id store) {
                     [notesStraight UTF8String], [notesCurly UTF8String]); failed++;
             }
         } else { fprintf(stderr, "  FAIL (could not create reminders)\n"); failed++; }
-        id rem25a = findReminder(store, straightTitle25, testListName);
-        if (rem25a) { NSString *id25a = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem25a, sel_registerName("objectID"))); cmdDelete(store, testListName, id25a); }
-        id rem25b = findReminder(store, curlyTitle25, testListName);
-        if (rem25b) { NSString *id25b = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem25b, sel_registerName("objectID"))); cmdDelete(store, testListName, id25b); }
+        id rem26a = findReminder(store, straightTitle26, testListName);
+        if (rem26a) { NSString *id26a = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem26a, sel_registerName("objectID"))); cmdDelete(store, testListName, id26a); }
+        id rem26b = findReminder(store, curlyTitle26, testListName);
+        if (rem26b) { NSString *id26b = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem26b, sel_registerName("objectID"))); cmdDelete(store, testListName, id26b); }
     }
 
-    // Test 26: exact match takes priority -- list collision
-    fprintf(stderr, "Test 26: Exact match priority (list)...\n");
+    // Test 27: exact match takes priority -- list collision
+    fprintf(stderr, "Test 27: Exact match priority (list)...\n");
     {
-        NSString *straightListName26 = @"__test Bob's List__";
-        NSString *curlyListName26 = @"__test Bob\u2019s List__";
-        int r1 = cmdCreateList(store, straightListName26);
-        int r2 = cmdCreateList(store, curlyListName26);
+        NSString *straightListName27 = @"__test Bob's List__";
+        NSString *curlyListName27 = @"__test Bob\u2019s List__";
+        int r1 = cmdCreateList(store, straightListName27);
+        int r2 = cmdCreateList(store, curlyListName27);
         if (r1 == 0 && r2 == 0) {
-            id foundStraight = findList(store, straightListName26);
-            id foundCurly = findList(store, curlyListName26);
+            id foundStraight = findList(store, straightListName27);
+            id foundCurly = findList(store, curlyListName27);
             if (foundStraight && foundCurly) {
                 id straightStorage = ((id (*)(id, SEL))objc_msgSend)(foundStraight, sel_registerName("storage"));
                 NSString *straightName = ((id (*)(id, SEL))objc_msgSend)(straightStorage, sel_registerName("name"));
                 id curlyStorage = ((id (*)(id, SEL))objc_msgSend)(foundCurly, sel_registerName("storage"));
                 NSString *curlyName = ((id (*)(id, SEL))objc_msgSend)(curlyStorage, sel_registerName("name"));
-                if ([straightName isEqualToString:straightListName26] && [curlyName isEqualToString:curlyListName26]) {
+                if ([straightName isEqualToString:straightListName27] && [curlyName isEqualToString:curlyListName27]) {
                     fprintf(stderr, "  PASS\n"); passed++;
                 } else { fprintf(stderr, "  FAIL (wrong list matched)\n"); failed++; }
             } else { fprintf(stderr, "  FAIL (could not find lists)\n"); failed++; }
         } else { fprintf(stderr, "  FAIL (could not create lists)\n"); failed++; }
-        cmdDeleteList(store, straightListName26);
-        cmdDeleteList(store, curlyListName26);
+        cmdDeleteList(store, straightListName27);
+        cmdDeleteList(store, curlyListName27);
     }
 
     // --- Note linking tests ---
 
-    // Test 23: Create reminder with applenotes:// URL, verify linkedNoteId
-    fprintf(stderr, "Test 23: Add with applenotes:// URL...\n");
+    // Test 28: Create reminder with applenotes:// URL, verify linkedNoteId
+    fprintf(stderr, "Test 28: Add with applenotes:// URL...\n");
     {
-        NSString *noteTitle23 = @"__remcli_test_note_url__";
-        int r = cmdAdd(store, noteTitle23, testListName, @{@"url": @"applenotes://showNote?identifier=FAKE-NOTE-ID"});
+        NSString *noteTitle28 = @"__remcli_test_note_url__";
+        int r = cmdAdd(store, noteTitle28, testListName, @{@"url": @"applenotes://showNote?identifier=FAKE-NOTE-ID"});
         if (r == 0) {
-            id rem = findReminder(store, noteTitle23, testListName);
+            id rem = findReminder(store, noteTitle28, testListName);
             NSDictionary *dict = reminderToDict(rem);
             if ([dict[@"url"] isEqualToString:@"applenotes://showNote?identifier=FAKE-NOTE-ID"]
                 && [dict[@"linkedNoteId"] isEqualToString:@"FAKE-NOTE-ID"]) {
@@ -1658,14 +1669,14 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
     }
 
-    // Test 24: Update reminder with different note URL
-    fprintf(stderr, "Test 24: Update with applenotes:// URL...\n");
+    // Test 29: Update reminder with different note URL
+    fprintf(stderr, "Test 29: Update with applenotes:// URL...\n");
     {
-        id rem24 = findReminder(store, @"__remcli_test_note_url__", testListName);
-        NSString *rem24ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem24, sel_registerName("objectID")));
-        int r = cmdUpdate(store, testListName, @{@"id": rem24ID, @"url": @"applenotes://showNote?identifier=OTHER-NOTE-ID"});
+        id rem29 = findReminder(store, @"__remcli_test_note_url__", testListName);
+        NSString *rem29ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem29, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem29ID, @"url": @"applenotes://showNote?identifier=OTHER-NOTE-ID"});
         if (r == 0) {
-            id updated = findReminderByID(store, rem24ID);
+            id updated = findReminderByID(store, rem29ID);
             NSDictionary *dict = reminderToDict(updated);
             if ([dict[@"linkedNoteId"] isEqualToString:@"OTHER-NOTE-ID"]) {
                 fprintf(stderr, "  PASS\n"); passed++;
@@ -1673,14 +1684,14 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 25: link-note command
-    fprintf(stderr, "Test 25: link-note command...\n");
+    // Test 30: link-note command
+    fprintf(stderr, "Test 30: link-note command...\n");
     {
-        id rem25 = findReminder(store, @"__remcli_test_note_url__", testListName);
-        NSString *rem25ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem25, sel_registerName("objectID")));
-        int r = cmdLinkNote(store, rem25ID, @"YET-ANOTHER-ID");
+        id rem30 = findReminder(store, @"__remcli_test_note_url__", testListName);
+        NSString *rem30ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem30, sel_registerName("objectID")));
+        int r = cmdLinkNote(store, rem30ID, @"YET-ANOTHER-ID");
         if (r == 0) {
-            id updated = findReminderByID(store, rem25ID);
+            id updated = findReminderByID(store, rem30ID);
             NSDictionary *dict = reminderToDict(updated);
             if ([dict[@"url"] isEqualToString:@"applenotes://showNote?identifier=YET-ANOTHER-ID"]
                 && [dict[@"linkedNoteId"] isEqualToString:@"YET-ANOTHER-ID"]) {
@@ -1689,14 +1700,14 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 26: clear-url removes URL and linkedNoteId
-    fprintf(stderr, "Test 26: --clear-url...\n");
+    // Test 31: clear-url removes URL and linkedNoteId
+    fprintf(stderr, "Test 31: --clear-url...\n");
     {
-        id rem26 = findReminder(store, @"__remcli_test_note_url__", testListName);
-        NSString *rem26ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem26, sel_registerName("objectID")));
-        int r = cmdUpdate(store, testListName, @{@"id": rem26ID, @"clear-url": @"true"});
+        id rem31 = findReminder(store, @"__remcli_test_note_url__", testListName);
+        NSString *rem31ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem31, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem31ID, @"clear-url": @"true"});
         if (r == 0) {
-            id updated = findReminderByID(store, rem26ID);
+            id updated = findReminderByID(store, rem31ID);
             NSDictionary *dict = reminderToDict(updated);
             if (dict[@"url"] == nil && dict[@"linkedNoteId"] == nil) {
                 fprintf(stderr, "  PASS\n"); passed++;
@@ -1704,14 +1715,14 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 27: Non-note URL should not have linkedNoteId
-    fprintf(stderr, "Test 27: Non-note URL has no linkedNoteId...\n");
+    // Test 32: Non-note URL should not have linkedNoteId
+    fprintf(stderr, "Test 32: Non-note URL has no linkedNoteId...\n");
     {
-        id rem27 = findReminder(store, @"__remcli_test_note_url__", testListName);
-        NSString *rem27ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem27, sel_registerName("objectID")));
-        int r = cmdUpdate(store, testListName, @{@"id": rem27ID, @"url": @"https://example.com"});
+        id rem32 = findReminder(store, @"__remcli_test_note_url__", testListName);
+        NSString *rem32ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem32, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem32ID, @"url": @"https://example.com"});
         if (r == 0) {
-            id updated = findReminderByID(store, rem27ID);
+            id updated = findReminderByID(store, rem32ID);
             NSDictionary *dict = reminderToDict(updated);
             if (dict[@"url"] != nil && dict[@"linkedNoteId"] == nil) {
                 fprintf(stderr, "  PASS\n"); passed++;
@@ -1719,14 +1730,14 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 28: Malformed applenotes:// URL (not showNote) has no linkedNoteId
-    fprintf(stderr, "Test 28: Malformed applenotes:// URL...\n");
+    // Test 33: Malformed applenotes:// URL (not showNote) has no linkedNoteId
+    fprintf(stderr, "Test 33: Malformed applenotes:// URL...\n");
     {
-        id rem28 = findReminder(store, @"__remcli_test_note_url__", testListName);
-        NSString *rem28ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem28, sel_registerName("objectID")));
-        int r = cmdUpdate(store, testListName, @{@"id": rem28ID, @"url": @"applenotes://other?foo=bar"});
+        id rem33 = findReminder(store, @"__remcli_test_note_url__", testListName);
+        NSString *rem33ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem33, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem33ID, @"url": @"applenotes://other?foo=bar"});
         if (r == 0) {
-            id updated = findReminderByID(store, rem28ID);
+            id updated = findReminderByID(store, rem33ID);
             NSDictionary *dict = reminderToDict(updated);
             if (dict[@"url"] != nil && dict[@"linkedNoteId"] == nil) {
                 fprintf(stderr, "  PASS\n"); passed++;
@@ -1734,14 +1745,14 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 29: applenotes:// URL without identifier param has no linkedNoteId
-    fprintf(stderr, "Test 29: applenotes://showNote without identifier...\n");
+    // Test 34: applenotes:// URL without identifier param has no linkedNoteId
+    fprintf(stderr, "Test 34: applenotes://showNote without identifier...\n");
     {
-        id rem29 = findReminder(store, @"__remcli_test_note_url__", testListName);
-        NSString *rem29ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem29, sel_registerName("objectID")));
-        int r = cmdUpdate(store, testListName, @{@"id": rem29ID, @"url": @"applenotes://showNote"});
+        id rem34 = findReminder(store, @"__remcli_test_note_url__", testListName);
+        NSString *rem34ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem34, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem34ID, @"url": @"applenotes://showNote"});
         if (r == 0) {
-            id updated = findReminderByID(store, rem29ID);
+            id updated = findReminderByID(store, rem34ID);
             NSDictionary *dict = reminderToDict(updated);
             if (dict[@"url"] != nil && dict[@"linkedNoteId"] == nil) {
                 fprintf(stderr, "  PASS\n"); passed++;
@@ -1749,8 +1760,8 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 30: --url and --clear-url together (conflict, subprocess)
-    fprintf(stderr, "Test 30: --url and --clear-url conflict...\n");
+    // Test 35: --url and --clear-url together (conflict, subprocess)
+    fprintf(stderr, "Test 35: --url and --clear-url conflict...\n");
     {
         char exePath[PATH_MAX];
         uint32_t exeSize = sizeof(exePath);
@@ -1760,14 +1771,14 @@ static int cmdTest(id store) {
             [[[NSString stringWithUTF8String:exePath]
               stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]
              UTF8String]];
-        NSString *cmd30 = [NSString stringWithFormat:@"%@ update --id VALID --url 'https://x.com' --clear-url 2>/dev/null", quotedExe];
-        int r = system([cmd30 UTF8String]);
+        NSString *cmd35 = [NSString stringWithFormat:@"%@ update --id VALID --url 'https://x.com' --clear-url 2>/dev/null", quotedExe];
+        int r = system([cmd35 UTF8String]);
         if (r != 0) { fprintf(stderr, "  PASS\n"); passed++; }
         else { fprintf(stderr, "  FAIL (should have errored)\n"); failed++; }
     }
 
-    // Test 31: link-note missing --note-id (subprocess)
-    fprintf(stderr, "Test 31: link-note missing --note-id...\n");
+    // Test 36: link-note missing --note-id (subprocess)
+    fprintf(stderr, "Test 36: link-note missing --note-id...\n");
     {
         char exePath[PATH_MAX];
         uint32_t exeSize = sizeof(exePath);
@@ -1777,14 +1788,14 @@ static int cmdTest(id store) {
             [[[NSString stringWithUTF8String:exePath]
               stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]
              UTF8String]];
-        NSString *cmd31 = [NSString stringWithFormat:@"%@ link-note --id VALID 2>/dev/null", quotedExe];
-        int r = system([cmd31 UTF8String]);
+        NSString *cmd36 = [NSString stringWithFormat:@"%@ link-note --id VALID 2>/dev/null", quotedExe];
+        int r = system([cmd36 UTF8String]);
         if (r != 0) { fprintf(stderr, "  PASS\n"); passed++; }
         else { fprintf(stderr, "  FAIL (should have errored)\n"); failed++; }
     }
 
-    // Test 32: link-note missing --id (subprocess)
-    fprintf(stderr, "Test 32: link-note missing --id...\n");
+    // Test 37: link-note missing --id (subprocess)
+    fprintf(stderr, "Test 37: link-note missing --id...\n");
     {
         char exePath[PATH_MAX];
         uint32_t exeSize = sizeof(exePath);
@@ -1794,8 +1805,8 @@ static int cmdTest(id store) {
             [[[NSString stringWithUTF8String:exePath]
               stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]
              UTF8String]];
-        NSString *cmd32 = [NSString stringWithFormat:@"%@ link-note --note-id FAKE 2>/dev/null", quotedExe];
-        int r = system([cmd32 UTF8String]);
+        NSString *cmd37 = [NSString stringWithFormat:@"%@ link-note --note-id FAKE 2>/dev/null", quotedExe];
+        int r = system([cmd37 UTF8String]);
         if (r != 0) { fprintf(stderr, "  PASS\n"); passed++; }
         else { fprintf(stderr, "  FAIL (should have errored)\n"); failed++; }
     }
@@ -1810,26 +1821,26 @@ static int cmdTest(id store) {
     }
 
     // Cleanup
-    // Test 33: cmdDelete child
-    fprintf(stderr, "Test 33: cmdDelete child...\n");
+    // Test 38: cmdDelete child
+    fprintf(stderr, "Test 38: cmdDelete child...\n");
     {
-        id rem33 = findReminder(store, childTitle, testListName);
-        NSString *rem33ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem33, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem33ID);
+        id rem38 = findReminder(store, childTitle, testListName);
+        NSString *rem38ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem38, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem38ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 34: cmdDelete parent
-    fprintf(stderr, "Test 34: cmdDelete parent...\n");
+    // Test 39: cmdDelete parent
+    fprintf(stderr, "Test 39: cmdDelete parent...\n");
     {
-        id rem34 = findReminder(store, parentTitle, testListName);
-        NSString *rem34ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem34, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem34ID);
+        id rem39 = findReminder(store, parentTitle, testListName);
+        NSString *rem39ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem39, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem39ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 35: cmdDeleteList
-    fprintf(stderr, "Test 35: cmdDeleteList...\n");
+    // Test 40: cmdDeleteList
+    fprintf(stderr, "Test 40: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
@@ -1840,18 +1851,16 @@ static int cmdTest(id store) {
 }
 
 
+
 // --- Install Skill ---
 
 static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
-    // Get path of currently running binary
     char execPath[PATH_MAX];
     uint32_t size = sizeof(execPath);
     if (_NSGetExecutablePath(execPath, &size) != 0) {
         fprintf(stderr, "Error: could not determine executable path\n");
         return 1;
     }
-
-    // Resolve symlinks to get the real path
     char realPath[PATH_MAX];
     if (!realpath(execPath, realPath)) {
         fprintf(stderr, "Error: could not resolve executable path\n");
@@ -1861,10 +1870,6 @@ static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
     NSString *binaryPath = [NSString stringWithUTF8String:realPath];
     NSString *binDir = [binaryPath stringByDeletingLastPathComponent];
 
-    // Try to find SKILL.md relative to the binary
-    // Homebrew: /opt/homebrew/Cellar/reminderkit-cli/X.Y.Z/bin/reminderkit
-    //   skill: /opt/homebrew/Cellar/reminderkit-cli/X.Y.Z/.agents/skills/apple-reminders/SKILL.md
-    // Build dir: ./reminderkit  ->  ./.agents/skills/apple-reminders/SKILL.md
     NSArray *candidates = @[
         [[binDir stringByDeletingLastPathComponent] stringByAppendingPathComponent:@".agents/skills/apple-reminders/SKILL.md"],
         [[binDir stringByAppendingPathComponent:@".."] stringByAppendingPathComponent:@".agents/skills/apple-reminders/SKILL.md"],
@@ -1890,23 +1895,13 @@ static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
         return 1;
     }
 
-    // Create target directory
     NSString *home = NSHomeDirectory();
-    NSString *targetDir = [home stringByAppendingPathComponent:@".claude/skills/apple-reminders"];
-    NSString *targetPath = [targetDir stringByAppendingPathComponent:@"SKILL.md"];
 
-    NSError *error = nil;
-    if (![fm createDirectoryAtPath:targetDir withIntermediateDirectories:YES attributes:nil error:&error]) {
-        fprintf(stderr, "Error: could not create directory %s: %s\n",
-            [targetDir UTF8String], [[error localizedDescription] UTF8String]);
-        return 1;
-    }
-
-    // Install to selected skill directories
     NSMutableArray *targetDirs = [NSMutableArray array];
     if (installClaude) [targetDirs addObject:[home stringByAppendingPathComponent:@".claude/skills/apple-reminders"]];
     if (installAgents) [targetDirs addObject:[home stringByAppendingPathComponent:@".agents/skills/apple-reminders"]];
 
+    NSError *error = nil;
     int failures = 0;
     for (NSString *dir in targetDirs) {
         NSString *path = [dir stringByAppendingPathComponent:@"SKILL.md"];
@@ -1952,6 +1947,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\n");
     fprintf(stderr, "  reminderkit remove-tag --id <id> --tag <tag-name>\n");
+    fprintf(stderr, "  reminderkit link-note --id <id> --note-id <note-id>\n");
     fprintf(stderr, "  reminderkit list-sections --name <list-name>\n");
     fprintf(stderr, "  reminderkit create-section --name <list-name> --section <section-name>\n");
     fprintf(stderr, "  reminderkit create-list --name <name>\n");
@@ -1989,6 +1985,7 @@ int main(int argc, const char *argv[]) {
                     [flag isEqualToString:@"remove-from-list"] ||
                     [flag isEqualToString:@"clear-url"] ||
                     [flag isEqualToString:@"help"] ||
+                    [flag isEqualToString:@"clear-url"] ||
                     [flag isEqualToString:@"claude"] ||
                     [flag isEqualToString:@"agents"] ||
                     [flag isEqualToString:@"force"]) {
@@ -2002,8 +1999,6 @@ int main(int argc, const char *argv[]) {
             }
         }
 
-        // Resolve keyword args: --title, --name, --tag, --section, --old-name, --new-name
-        // Keyword args take priority over positional args
         NSString *kwTitle = opts[@"title"];
         NSString *kwName = opts[@"name"];
         NSString *kwTag = opts[@"tag"];
@@ -2077,6 +2072,11 @@ int main(int argc, const char *argv[]) {
             if (!kwTag) { fprintf(stderr, "Error: --tag required\n"); usage(); return 1; }
             return cmdRemoveTag(store, opts[@"id"], kwTag);
 
+        } else if ([command isEqualToString:@"link-note"]) {
+            if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
+            if (!opts[@"note-id"] || [opts[@"note-id"] length] == 0) { fprintf(stderr, "Error: --note-id required\n"); usage(); return 1; }
+            return cmdLinkNote(store, opts[@"id"], opts[@"note-id"]);
+
         } else if ([command isEqualToString:@"list-sections"]) {
             if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
             return cmdListSections(store, kwName);
@@ -2101,7 +2101,6 @@ int main(int argc, const char *argv[]) {
             BOOL wantClaude = [opts[@"claude"] isEqualToString:@"true"];
             BOOL wantAgents = [opts[@"agents"] isEqualToString:@"true"];
             BOOL force = [opts[@"force"] isEqualToString:@"true"];
-            // Default: install to both
             if (!wantClaude && !wantAgents) { wantClaude = YES; wantAgents = YES; }
             return cmdInstallSkill(wantClaude, wantAgents, force);
 
