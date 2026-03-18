@@ -85,7 +85,9 @@ jobs:
 
           SHA=$(shasum -a 256 /tmp/release.tar.gz | cut -d' ' -f1)
 
-          git clone https://x-access-token:${TAP_TOKEN}@github.com/johnmatthewtennant/homebrew-tap.git /tmp/homebrew-tap
+          # Clone tap using credential helper (avoid token in URL)
+          git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${TAP_TOKEN}"; }; f'
+          git clone https://github.com/johnmatthewtennant/homebrew-tap.git /tmp/homebrew-tap
           cd /tmp/homebrew-tap
 
           sed -i '' "s|url \".*\"|url \"https://github.com/johnmatthewtennant/reminderkit-cli/archive/refs/tags/${TAG}.tar.gz\"|" Formula/reminderkit-cli.rb

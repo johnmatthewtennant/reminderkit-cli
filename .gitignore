@@ -2,3 +2,4 @@ reminderkit
 remkit-inspect
 *.o
 .DS_Store
+thoughts/
