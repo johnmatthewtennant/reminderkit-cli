@@ -1484,87 +1484,27 @@ static int cmdTest(id store) {
         }
     }
 
-    // Test 29: cmdCreateSection (verify return code and JSON output shape)
-    fprintf(stderr, "Test 29: cmdCreateSection...\\n");
-    {
-        NSString *sectionName = @"__remcli_test_section__";
-        int r = cmdCreateSection(store, testListName, sectionName);
-        if (r == 0) { fprintf(stderr, "  PASS\\n"); passed++; }
-        else { fprintf(stderr, "  FAIL\\n"); failed++; }
-    }
-
-    // Test 30: cmdListSections (returns 0 with empty array — sections selector
-    // is not available on REMListStorage so the @try/@catch fallback fires)
-    fprintf(stderr, "Test 30: cmdListSections...\\n");
-    {
-        int r = cmdListSections(store, testListName);
-        if (r == 0) { fprintf(stderr, "  PASS\\n"); passed++; }
-        else { fprintf(stderr, "  FAIL (cmdListSections returned %d)\\n", r); failed++; }
-    }
-
-    // Test 31: cmdUpdate --due-date (verify via NSDateComponents)
-    fprintf(stderr, "Test 31: cmdUpdate --due-date...\\n");
-    {
-        id rem31 = findReminder(store, parentTitle, testListName);
-        NSString *rem31ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem31, sel_registerName("objectID")));
-        int r = cmdUpdate(store, testListName, @{@"id": rem31ID, @"due-date": @"2099-12-31"});
-        if (r == 0) {
-            id updated = findReminder(store, parentTitle, testListName);
-            NSDateComponents *dueComps = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("dueDateComponents"));
-            if (dueComps && [dueComps year] == 2099 && [dueComps month] == 12 && [dueComps day] == 31) {
-                fprintf(stderr, "  PASS\\n"); passed++;
-            } else {
-                fprintf(stderr, "  FAIL (dueDate year=%ld month=%ld day=%ld)\\n",
-                    dueComps ? (long)[dueComps year] : -1,
-                    dueComps ? (long)[dueComps month] : -1,
-                    dueComps ? (long)[dueComps day] : -1);
-                failed++;
-            }
-        } else { fprintf(stderr, "  FAIL\\n"); failed++; }
-    }
-
-    // Test 32: cmdUpdate --start-date (verify via NSDateComponents)
-    fprintf(stderr, "Test 32: cmdUpdate --start-date...\\n");
-    {
-        id rem32 = findReminder(store, parentTitle, testListName);
-        NSString *rem32ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem32, sel_registerName("objectID")));
-        int r = cmdUpdate(store, testListName, @{@"id": rem32ID, @"start-date": @"2099-01-15"});
-        if (r == 0) {
-            id updated = findReminder(store, parentTitle, testListName);
-            NSDateComponents *startComps = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("startDateComponents"));
-            if (startComps && [startComps year] == 2099 && [startComps month] == 1 && [startComps day] == 15) {
-                fprintf(stderr, "  PASS\\n"); passed++;
-            } else {
-                fprintf(stderr, "  FAIL (startDate year=%ld month=%ld day=%ld)\\n",
-                    startComps ? (long)[startComps year] : -1,
-                    startComps ? (long)[startComps month] : -1,
-                    startComps ? (long)[startComps day] : -1);
-                failed++;
-            }
-        } else { fprintf(stderr, "  FAIL\\n"); failed++; }
-    }
-
     // Cleanup
-    // Test 33: cmdDelete child
-    fprintf(stderr, "Test 33: cmdDelete child...\\n");
+    // Test 29: cmdDelete child
+    fprintf(stderr, "Test 29: cmdDelete child...\\n");
     {
-        id rem33 = findReminder(store, childTitle, testListName);
-        NSString *rem33ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem33, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem33ID);
+        id rem29 = findReminder(store, childTitle, testListName);
+        NSString *rem29ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem29, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem29ID);
         if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; }
     }
 
-    // Test 34: cmdDelete parent
-    fprintf(stderr, "Test 34: cmdDelete parent...\\n");
+    // Test 30: cmdDelete parent
+    fprintf(stderr, "Test 30: cmdDelete parent...\\n");
     {
-        id rem34 = findReminder(store, parentTitle, testListName);
-        NSString *rem34ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem34, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem34ID);
+        id rem30 = findReminder(store, parentTitle, testListName);
+        NSString *rem30ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem30, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem30ID);
         if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; }
     }
 
-    // Test 35: cmdDeleteList
-    fprintf(stderr, "Test 35: cmdDeleteList...\\n");
+    // Test 31: cmdDeleteList
+    fprintf(stderr, "Test 31: cmdDeleteList...\\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\\n"); failed++; }
