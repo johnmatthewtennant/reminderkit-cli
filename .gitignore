@@ -3,3 +3,5 @@ remkit-inspect
 *.o
 .DS_Store
 thoughts/
+*.local.*
+CLAUDE.local.md
