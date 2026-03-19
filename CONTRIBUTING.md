@@ -3,26 +3,36 @@
 ## Architecture
 
 ```
-remkit-inspect.m   Runtime introspection tool — dumps ObjC properties/methods
+remkit-inspect.m           Runtime introspection tool — dumps ObjC properties/methods
         |
         v  (stdout: property list)
-generate-cli.py    Code generator — reads config dicts, emits Objective-C
+generate-cli.py            Code generator — reads config dicts, emits Objective-C
         |
         v  (stdout: generated source)
-reminderkit.m      CLI source — wraps Apple's private ReminderKit framework
+reminderkit-generated.m    AUTO-GENERATED — config-driven commands, helpers, serialization
+reminderkit-handwritten.m  Manually maintained commands (cmdBatch, cmdInstallSkill)
+reminderkit-tests.m        Test infrastructure (cmdTest + helpers)
+reminderkit.m              Assembly file — #includes the above three + usage/main
         |
         v  (clang)
-reminderkit        Final binary
+reminderkit                Final binary
 ```
 
-`remkit-inspect.m` discovers available properties and methods on `REMReminder` and related classes at runtime. Its output feeds into `generate-cli.py`, which uses configuration dictionaries (`REMINDER_READ_PROPS`, `REMINDER_WRITE_OPS`, `SPECIAL_WRITE_OPS`) to produce `reminderkit.m`.
+`remkit-inspect.m` discovers available properties and methods on `REMReminder` and related classes at runtime. Its output feeds into `generate-cli.py`, which uses configuration dictionaries (`REMINDER_READ_PROPS`, `REMINDER_WRITE_OPS`, `SPECIAL_WRITE_OPS`) to produce `reminderkit-generated.m`.
 
-**Note:** `reminderkit.m` was originally fully generated but is now maintained manually. The generator still produces a working scaffold, but hand-written features (normalized quote matching, `linkedNoteId` extraction, note linking) live only in `reminderkit.m`. Running `make generate` will overwrite these additions.
+**File ownership:**
+- `reminderkit-generated.m` — owned by the generator. Do not edit manually. Run `make generate` to regenerate.
+- `reminderkit-handwritten.m` — manually maintained commands not produced by the generator.
+- `reminderkit-tests.m` — test infrastructure, manually maintained.
+- `reminderkit.m` — assembly file with `#include` directives, `usage()`, and `main()`. Manually maintained.
+
+**Include order matters:** `reminderkit.m` includes generated → handwritten → tests. Each file depends on symbols from earlier includes (generated provides helpers, handwritten provides batch/skill commands, tests use both). Do not reorder.
 
 ## Building
 
 ```bash
 make              # build reminderkit binary
+make generate     # regenerate reminderkit-generated.m and rebuild
 make clean        # remove build artifacts
 ```
 
@@ -42,8 +52,7 @@ This dumps all Objective-C properties and methods on `REMReminder`, `REMReminder
    "objcPropertyName": ("jsonKey", "type_hint"),
    ```
 2. Type hints: `"string"`, `"bool"`, `"bool_getter"`, `"int"`, `"uint"`, `"date"`, `"datecomps"`, `"objid"`, `"set_hashtags"`
-3. Add the corresponding read logic to `reminderToDict` in `reminderkit.m`
-4. Rebuild: `make`
+3. Regenerate: `make generate`
 
 ## Adding a new write operation (setter)
 
@@ -53,8 +62,14 @@ This dumps all Objective-C properties and methods on `REMReminder`, `REMReminder
    ```
 2. Arg types: `"string"`, `"bool"`, `"int"`, `"uint"`, `"datecomps"`, `"url"`
 3. For no-arg methods (like `removeFromParentReminder`), add to `SPECIAL_WRITE_OPS` instead
-4. Add the corresponding setter logic to `cmdUpdate` in `reminderkit.m`
-5. Rebuild: `make`
+4. Regenerate: `make generate`
+
+## Adding a handwritten command
+
+1. Add the command function to `reminderkit-handwritten.m`
+2. Add dispatch logic to `main()` in `reminderkit.m`
+3. Add usage line to `usage()` in `reminderkit.m`
+4. Rebuild: `make`
 
 ## Running tests
 
@@ -66,6 +81,8 @@ Tests create a temporary list (`__remcli_test_list__`) in Apple Reminders, exerc
 
 ## Adding a test
 
-Tests are numbered sequentially in the `cmdTest` function in `reminderkit.m`. Add new tests before the cleanup section (the `cmdDelete child` / `cmdDelete parent` / `cmdDeleteList` tests at the end).
+Tests are numbered sequentially in `cmdTest` in `reminderkit-tests.m`. Add new tests before the cleanup section (the `cmdDelete child` / `cmdDelete parent` / `cmdDeleteList` tests at the end).
 
-Update the corresponding test block in `generate-cli.py` if the test covers generator-produced functionality.
+## Generator sync
+
+A pre-push hook verifies that `reminderkit-generated.m` matches the generator output. If it fails, run `make generate` and commit the result.
