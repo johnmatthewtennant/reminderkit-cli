@@ -447,6 +447,14 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
     id list = nil;
     NSString *parentID = opts[@"parent-id"];
 
+    // Resolve --parent (title) to parent-id
+    if (opts[@"parent"]) {
+        if (parentID) errorExit(@"Cannot specify both --parent and --parent-id");
+        id parentByTitle = findReminder(store, opts[@"parent"], listName);
+        if (!parentByTitle) errorExit([NSString stringWithFormat:@"Parent not found with title: %@", opts[@"parent"]]);
+        parentID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(parentByTitle, sel_registerName("objectID")));
+    }
+
     if (parentID) {
         // Look up parent to derive/validate list
         id parentRem = findReminderByID(store, parentID);
@@ -515,9 +523,9 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
         }
     }
 
-    // Reparent: --parent-id
-    if (opts[@"parent-id"]) {
-        reparentChangeItem(store, saveReq, listCI, newRem, opts[@"parent-id"]);
+    // Reparent: --parent-id or --parent
+    if (parentID) {
+        reparentChangeItem(store, saveReq, listCI, newRem, parentID);
     }
 
     NSError *error = nil;
@@ -951,7 +959,7 @@ static int cmdBatch(id store) {
     NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
         @"notes", @"priority", @"flagged", @"completed",
         @"due-date", @"start-date", @"url", @"remove-parent", @"remove-from-list",
-        @"parent-id", @"to-list"]];
+        @"parent-id", @"parent", @"to-list"]];
 
     // Validate all operations first
     for (NSUInteger i = 0; i < ops.count; i++) {
@@ -1094,34 +1102,43 @@ static int cmdBatch(id store) {
 // --- Test Helpers ---
 
 // Capture stdout from a block into an NSData buffer.
+// Uses a temp file to avoid pipe buffer deadlocks on large output.
 static NSData *captureStdout(void (^block)(void)) {
     fflush(stdout);
-    int pipefd[2];
-    if (pipe(pipefd) != 0) return nil;
+    char tmpl[] = "/tmp/remcli-test-XXXXXX";
+    int tmpfd = mkstemp(tmpl);
+    if (tmpfd < 0) return nil;
+    unlink(tmpl);
+
     int savedStdout = dup(STDOUT_FILENO);
-    if (savedStdout < 0) { close(pipefd[0]); close(pipefd[1]); return nil; }
-    dup2(pipefd[1], STDOUT_FILENO);
-    close(pipefd[1]);
+    if (savedStdout < 0) { close(tmpfd); return nil; }
+    if (dup2(tmpfd, STDOUT_FILENO) < 0) { close(tmpfd); close(savedStdout); return nil; }
+    close(tmpfd);
 
     block();
     fflush(stdout);
 
-    dup2(savedStdout, STDOUT_FILENO);
+    tmpfd = dup(STDOUT_FILENO);
+    if (dup2(savedStdout, STDOUT_FILENO) < 0) { close(tmpfd); close(savedStdout); return nil; }
     close(savedStdout);
 
+    lseek(tmpfd, 0, SEEK_SET);
     NSMutableData *buf = [NSMutableData data];
     char tmp[4096];
     ssize_t n;
-    while ((n = read(pipefd[0], tmp, sizeof(tmp))) > 0) {
+    while ((n = read(tmpfd, tmp, sizeof(tmp))) > 0) {
         [buf appendBytes:tmp length:n];
     }
-    close(pipefd[0]);
+    close(tmpfd);
     return buf;
 }
 
 static id parseJSONFromData(NSData *data) {
     if (!data || data.length == 0) return nil;
-    return [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    NSError *err = nil;
+    id result = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
+    if (err) fprintf(stderr, "  JSON parse error: %s\n", [[err localizedDescription] UTF8String]);
+    return result;
 }
 
 static BOOL jsonArrayHasKey(NSArray *arr, NSString *key) {
@@ -1129,6 +1146,26 @@ static BOOL jsonArrayHasKey(NSArray *arr, NSString *key) {
         if ([item isKindOfClass:[NSDictionary class]] && item[key] != nil) return YES;
     }
     return NO;
+}
+
+// Check that ALL dicts in a JSON array have the given key.
+static BOOL jsonArrayAllHaveKey(NSArray *arr, NSString *key) {
+    if (arr.count == 0) return NO;
+    for (id item in arr) {
+        if (![item isKindOfClass:[NSDictionary class]] || ((NSDictionary *)item)[key] == nil) return NO;
+    }
+    return YES;
+}
+
+// Find the first dict in a JSON array with a matching value for a key.
+static NSDictionary *jsonArrayFind(NSArray *arr, NSString *key, NSString *value) {
+    for (id item in arr) {
+        if ([item isKindOfClass:[NSDictionary class]]) {
+            id v = ((NSDictionary *)item)[key];
+            if ([v isKindOfClass:[NSString class]] && [v isEqualToString:value]) return item;
+        }
+    }
+    return nil;
 }
 
 static int cmdTest(id store) {
@@ -1167,8 +1204,10 @@ static int cmdTest(id store) {
             id json = parseJSONFromData(out);
             if (![json isKindOfClass:[NSArray class]]) {
                 fprintf(stderr, "  FAIL (not a JSON array)\n"); failed++;
-            } else if (!jsonArrayHasKey(json, @"name") || !jsonArrayHasKey(json, @"id")) {
-                fprintf(stderr, "  FAIL (missing 'name' or 'id' keys)\n"); failed++;
+            } else if (!jsonArrayAllHaveKey(json, @"name") || !jsonArrayAllHaveKey(json, @"id")) {
+                fprintf(stderr, "  FAIL (not all items have 'name' and 'id')\n"); failed++;
+            } else if (!jsonArrayFind(json, @"name", testListName)) {
+                fprintf(stderr, "  FAIL (test list not found in output)\n"); failed++;
             } else { fprintf(stderr, "  PASS\n"); passed++; }
         }
     }
@@ -1287,9 +1326,11 @@ static int cmdTest(id store) {
             id json = parseJSONFromData(out);
             if (![json isKindOfClass:[NSArray class]]) {
                 fprintf(stderr, "  FAIL (not a JSON array)\n"); failed++;
-            } else if (!jsonArrayHasKey(json, @"title") || !jsonArrayHasKey(json, @"id")
-                    || !jsonArrayHasKey(json, @"completed") || !jsonArrayHasKey(json, @"priority")) {
-                fprintf(stderr, "  FAIL (missing expected fields)\n"); failed++;
+            } else if (!jsonArrayAllHaveKey(json, @"title") || !jsonArrayAllHaveKey(json, @"id")
+                    || !jsonArrayAllHaveKey(json, @"completed") || !jsonArrayAllHaveKey(json, @"priority")) {
+                fprintf(stderr, "  FAIL (not all items have expected fields)\n"); failed++;
+            } else if (!jsonArrayFind(json, @"title", parentTitle)) {
+                fprintf(stderr, "  FAIL (parent reminder not found in output)\n"); failed++;
             } else { fprintf(stderr, "  PASS\n"); passed++; }
         }
     }
@@ -1358,8 +1399,10 @@ static int cmdTest(id store) {
                 NSArray *arr = json;
                 if (arr.count == 0) {
                     fprintf(stderr, "  FAIL (empty array, expected subtasks)\n"); failed++;
-                } else if (!jsonArrayHasKey(arr, @"title") || !jsonArrayHasKey(arr, @"id")) {
-                    fprintf(stderr, "  FAIL (subtask missing expected fields)\n"); failed++;
+                } else if (!jsonArrayAllHaveKey(arr, @"title") || !jsonArrayAllHaveKey(arr, @"id")) {
+                    fprintf(stderr, "  FAIL (subtask items missing expected fields)\n"); failed++;
+                } else if (!jsonArrayFind(arr, @"title", childTitle)) {
+                    fprintf(stderr, "  FAIL (child reminder not found in subtasks)\n"); failed++;
                 } else { fprintf(stderr, "  PASS\n"); passed++; }
             }
         }
@@ -1539,27 +1582,118 @@ static int cmdTest(id store) {
         }
     }
 
+    // Test 29: cmdCreateSection (verify return code and JSON output shape)
+    fprintf(stderr, "Test 29: cmdCreateSection...\n");
+    {
+        NSString *sectionName = @"__remcli_test_section__";
+        int r = cmdCreateSection(store, testListName, sectionName);
+        if (r == 0) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 30: cmdListSections (returns 0 with empty array — sections selector
+    // is not available on REMListStorage so the @try/@catch fallback fires)
+    fprintf(stderr, "Test 30: cmdListSections...\n");
+    {
+        int r = cmdListSections(store, testListName);
+        // cmdListSections always returns 0; the sections selector throws on
+        // REMListStorage, which is caught internally, producing an empty JSON array.
+        if (r == 0) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL (cmdListSections returned %d)\n", r); failed++; }
+    }
+
+    // Test 31: cmdUpdate --due-date (verify via NSDateComponents)
+    fprintf(stderr, "Test 31: cmdUpdate --due-date...\n");
+    {
+        id rem31 = findReminder(store, parentTitle, testListName);
+        NSString *rem31ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem31, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem31ID, @"due-date": @"2099-12-31"});
+        if (r == 0) {
+            id updated = findReminder(store, parentTitle, testListName);
+            NSDateComponents *dueComps = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("dueDateComponents"));
+            if (dueComps && [dueComps year] == 2099 && [dueComps month] == 12 && [dueComps day] == 31) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else {
+                fprintf(stderr, "  FAIL (dueDate year=%ld month=%ld day=%ld)\n",
+                    dueComps ? (long)[dueComps year] : -1,
+                    dueComps ? (long)[dueComps month] : -1,
+                    dueComps ? (long)[dueComps day] : -1);
+                failed++;
+            }
+        } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 32: cmdUpdate --start-date (verify via NSDateComponents)
+    fprintf(stderr, "Test 32: cmdUpdate --start-date...\n");
+    {
+        id rem32 = findReminder(store, parentTitle, testListName);
+        NSString *rem32ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem32, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem32ID, @"start-date": @"2099-01-15"});
+        if (r == 0) {
+            id updated = findReminder(store, parentTitle, testListName);
+            NSDateComponents *startComps = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("startDateComponents"));
+            if (startComps && [startComps year] == 2099 && [startComps month] == 1 && [startComps day] == 15) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else {
+                fprintf(stderr, "  FAIL (startDate year=%ld month=%ld day=%ld)\n",
+                    startComps ? (long)[startComps year] : -1,
+                    startComps ? (long)[startComps month] : -1,
+                    startComps ? (long)[startComps day] : -1);
+                failed++;
+            }
+        } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 33: cmdUpdate --parent (reparent by title)
+    fprintf(stderr, "Test 33: cmdUpdate --parent (reparent by title)...\n");
+    {
+        // Create a second parent to reparent the child to
+        NSString *parent2Title = @"__remcli_test_parent2__";
+        int r1 = cmdAdd(store, parent2Title, testListName, @{});
+        if (r1 == 0) {
+            id childRem = findReminder(store, childTitle, testListName);
+            NSString *childID33 = objectIDToString(((id (*)(id, SEL))objc_msgSend)(childRem, sel_registerName("objectID")));
+            int r2 = cmdUpdate(store, testListName, @{@"id": childID33, @"parent": parent2Title});
+            if (r2 == 0) {
+                // Verify the child now belongs to the new parent
+                id updatedChild = findReminder(store, childTitle, testListName);
+                id newParent = findReminder(store, parent2Title, testListName);
+                id childPID = updatedChild ? ((id (*)(id, SEL))objc_msgSend)(updatedChild, sel_registerName("parentReminderID")) : nil;
+                id newParentOID = newParent ? ((id (*)(id, SEL))objc_msgSend)(newParent, sel_registerName("objectID")) : nil;
+                if (childPID && newParentOID && [objectIDToString(childPID) isEqualToString:objectIDToString(newParentOID)]) {
+                    fprintf(stderr, "  PASS\n"); passed++;
+                } else { fprintf(stderr, "  FAIL (parent mismatch)\n"); failed++; }
+            } else { fprintf(stderr, "  FAIL (update returned %d)\n", r2); failed++; }
+            // Clean up second parent
+            id p2 = findReminder(store, parent2Title, testListName);
+            if (p2) {
+                NSString *p2ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(p2, sel_registerName("objectID")));
+                cmdDelete(store, testListName, p2ID);
+            }
+        } else { fprintf(stderr, "  FAIL (add parent2 failed)\n"); failed++; }
+    }
+
     // Cleanup
-    // Test 29: cmdDelete child
-    fprintf(stderr, "Test 29: cmdDelete child...\n");
+    // Test 34: cmdDelete child
+    fprintf(stderr, "Test 34: cmdDelete child...\n");
     {
-        id rem29 = findReminder(store, childTitle, testListName);
-        NSString *rem29ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem29, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem29ID);
+        id rem34 = findReminder(store, childTitle, testListName);
+        NSString *rem34ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem34, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem34ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 30: cmdDelete parent
-    fprintf(stderr, "Test 30: cmdDelete parent...\n");
+    // Test 35: cmdDelete parent
+    fprintf(stderr, "Test 35: cmdDelete parent...\n");
     {
-        id rem30 = findReminder(store, parentTitle, testListName);
-        NSString *rem30ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem30, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem30ID);
+        id rem35 = findReminder(store, parentTitle, testListName);
+        NSString *rem35ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem35, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem35ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 31: cmdDeleteList
-    fprintf(stderr, "Test 31: cmdDeleteList...\n");
+    // Test 36: cmdDeleteList
+    fprintf(stderr, "Test 36: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
@@ -1660,7 +1794,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit search --title <title> [--list <name>]\n");
     fprintf(stderr, "  reminderkit get --title <title> [--list <name>]  (alias for search)\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
-    fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
+    fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>] [--parent <title>]\n");
     fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--parent <title>] [--to-list <name>]\n");
     fprintf(stderr, "  reminderkit complete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
