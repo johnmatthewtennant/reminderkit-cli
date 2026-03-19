@@ -160,6 +160,13 @@ static NSDateComponents *stringToDateComps(NSString *str) {
     return comps;
 }
 
+static NSString *normalizeQuotes(NSString *str) {
+    if (!str) return nil;
+    NSString *result = [str stringByReplacingOccurrencesOfString:@"\\u2018" withString:@"'"];
+    result = [result stringByReplacingOccurrencesOfString:@"\\u2019" withString:@"'"];
+    return result;
+}
+
 static void printJSON(id obj) {
     NSError *error = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
