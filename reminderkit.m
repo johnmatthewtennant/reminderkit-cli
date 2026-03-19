@@ -139,6 +139,28 @@ static NSArray *fetchReminders(id store, id list, BOOL includeCompleted) {
     return incomplete;
 }
 
+// Find all incomplete reminders with an exact title match.
+// Returns an array of matching reminder objects (may be empty).
+static NSArray *findIncompleteByExactTitle(id store, NSString *title, NSString *listName) {
+    NSArray *lists;
+    if (listName) {
+        id list = findList(store, listName);
+        if (!list) return @[];
+        lists = @[list];
+    } else {
+        lists = fetchLists(store);
+    }
+    NSMutableArray *results = [NSMutableArray array];
+    for (id list in lists) {
+        NSArray *rems = fetchReminders(store, list, NO);
+        for (id rem in rems) {
+            NSString *t = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("titleAsString"));
+            if ([t isEqualToString:title]) [results addObject:rem];
+        }
+    }
+    return results;
+}
+
 static id findReminder(id store, NSString *title, NSString *listName) {
     NSArray *lists;
     if (listName) {
@@ -471,7 +493,82 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
     }
     if (!list) errorExit(@"No list found");
 
-    // Get the list change item from save request
+    // Resolve the list name for lookups
+    NSString *resolvedListName = listName;
+    if (!resolvedListName) {
+        id listStorage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+        resolvedListName = ((id (*)(id, SEL))objc_msgSend)(listStorage, sel_registerName("name"));
+    }
+
+    // If --parent-id is set, check if exactly one incomplete reminder with this
+    // title already exists. If so, reparent it instead of creating a duplicate.
+    // If multiple matches exist, fall through to create (ambiguous — user should use --id).
+    if (parentID) {
+        NSArray *matches = findIncompleteByExactTitle(store, title, resolvedListName);
+        if (matches.count == 1) {
+            id existing = matches[0];
+            id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+                [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+
+            id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                saveReq, sel_registerName("updateList:"), list);
+
+            id existingCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                saveReq, sel_registerName("updateReminder:"), existing);
+
+            // Apply any add-time fields to the existing reminder
+            if (opts[@"notes"]) {
+                ((void (*)(id, SEL, id))objc_msgSend)(existingCI, sel_registerName("setNotesAsString:"), opts[@"notes"]);
+            }
+            if (opts[@"priority"]) {
+                NSUInteger val = [opts[@"priority"] integerValue];
+                ((void (*)(id, SEL, NSUInteger))objc_msgSend)(existingCI, sel_registerName("setPriority:"), val);
+            }
+            if (opts[@"flagged"]) {
+                NSInteger val = [opts[@"flagged"] integerValue];
+                ((void (*)(id, SEL, NSInteger))objc_msgSend)(existingCI, sel_registerName("setFlagged:"), val);
+            }
+            if (opts[@"due-date"]) {
+                NSDateComponents *comps = stringToDateComps(opts[@"due-date"]);
+                ((void (*)(id, SEL, id))objc_msgSend)(existingCI, sel_registerName("setDueDateComponents:"), comps);
+            }
+            if (opts[@"start-date"]) {
+                NSDateComponents *comps = stringToDateComps(opts[@"start-date"]);
+                ((void (*)(id, SEL, id))objc_msgSend)(existingCI, sel_registerName("setStartDateComponents:"), comps);
+            }
+            if (opts[@"url"]) {
+                NSURL *url = [NSURL URLWithString:opts[@"url"]];
+                if (url) {
+                    id attCtx = ((id (*)(id, SEL))objc_msgSend)(existingCI, sel_registerName("attachmentContext"));
+                    ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), url);
+                }
+            }
+
+            // Record the existing reminder's ID for re-fetch by ID (not by title)
+            id existingObjID = ((id (*)(id, SEL))objc_msgSend)(existing, sel_registerName("objectID"));
+            NSString *existingIDStr = objectIDToString(existingObjID);
+
+            reparentChangeItem(store, saveReq, listCI, existingCI, parentID);
+
+            NSError *error = nil;
+            BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+                saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+            if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+            // Re-fetch by ID to avoid returning a completed same-title reminder
+            id reparented = findReminderByID(store, existingIDStr);
+            if (reparented) printJSON(reminderToDict(reparented));
+            else fprintf(stderr, "Reparented (but could not re-fetch)\n");
+            return 0;
+        }
+        if (matches.count > 1) {
+            errorExit([NSString stringWithFormat:
+                @"Multiple incomplete reminders match '%@'. Use update --parent-id with --id to reparent a specific one.", title]);
+        }
+        // matches.count == 0: fall through to create-new path
+    }
+
+    // Create new reminder — no existing match found
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
 
@@ -516,9 +613,9 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
         }
     }
 
-    // Reparent: --parent-id
-    if (opts[@"parent-id"]) {
-        reparentChangeItem(store, saveReq, listCI, newRem, opts[@"parent-id"]);
+    // Reparent: --parent-id (new reminder, not existing)
+    if (parentID) {
+        reparentChangeItem(store, saveReq, listCI, newRem, parentID);
     }
 
     NSError *error = nil;
@@ -526,13 +623,7 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
-    // Re-fetch and return — use the resolved list name for accurate lookup
-    // (when --parent-id is used without --list, listName is nil but list was derived from parent)
-    NSString *resolvedListName = listName;
-    if (!resolvedListName) {
-        id listStorage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
-        resolvedListName = ((id (*)(id, SEL))objc_msgSend)(listStorage, sel_registerName("name"));
-    }
+    // Re-fetch and return
     id created = findReminder(store, title, resolvedListName);
     if (created) printJSON(reminderToDict(created));
     else fprintf(stderr, "Created (but could not re-fetch)\n");
@@ -1012,8 +1103,41 @@ static int cmdBatch(id store) {
             }
             if (!list) errorExit(@"No list found for add operation");
 
+            // Resolve list name for lookups
+            NSString *batchResolvedListName = opList;
+            if (!batchResolvedListName) {
+                id batchListStorage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+                batchResolvedListName = ((id (*)(id, SEL))objc_msgSend)(batchListStorage, sel_registerName("name"));
+            }
+
             id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
                 saveReq, sel_registerName("updateList:"), list);
+
+            // If parent-id is set, check if exactly one incomplete reminder exists — reparent it
+            if (batchParentID) {
+                NSArray *batchMatches = findIncompleteByExactTitle(store, opTitle, batchResolvedListName);
+                if (batchMatches.count == 1) {
+                    id existing = batchMatches[0];
+                    id existingCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                        saveReq, sel_registerName("updateReminder:"), existing);
+                    // Apply add-time fields to existing
+                    if (op[@"notes"]) ((void (*)(id, SEL, id))objc_msgSend)(existingCI, sel_registerName("setNotesAsString:"), op[@"notes"]);
+                    if (op[@"priority"]) ((void (*)(id, SEL, NSUInteger))objc_msgSend)(existingCI, sel_registerName("setPriority:"), [op[@"priority"] integerValue]);
+                    if (op[@"flagged"]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(existingCI, sel_registerName("setFlagged:"), [op[@"flagged"] integerValue]);
+                    if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(existingCI, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
+                    if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(existingCI, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
+                    if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(existingCI, sel_registerName("attachmentContext")); ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), u); } }
+                    reparentChangeItem(store, saveReq, listCI, existingCI, batchParentID);
+                    [results addObject:@{@"op": @"add", @"title": opTitle, @"status": @"reparented"}];
+                    continue;
+                }
+                if (batchMatches.count > 1) {
+                    errorExit([NSString stringWithFormat:
+                        @"Batch add: multiple incomplete reminders match '%@'. Use update with --id to reparent a specific one.", opTitle]);
+                }
+                // 0 matches: fall through to create-new
+            }
+
             id newRem = ((id (*)(id, SEL, id, id))objc_msgSend)(
                 saveReq, sel_registerName("addReminderWithTitle:toListChangeItem:"),
                 opTitle, listCI);
@@ -1548,8 +1672,65 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
+    // Test 33: add --parent-id reparents existing reminder instead of duplicating
+    fprintf(stderr, "Test 33: add --parent-id reparents existing...\n");
+    {
+        NSString *reparentTitle = @"__remcli_test_reparent_existing__";
+
+        // Pre-cleanup: remove any stale reminders with this title
+        id stale33;
+        while ((stale33 = findReminder(store, reparentTitle, testListName))) {
+            NSString *staleID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(stale33, sel_registerName("objectID")));
+            cmdDelete(store, testListName, staleID);
+        }
+
+        // Create a standalone reminder
+        int r1 = cmdAdd(store, reparentTitle, testListName, @{});
+        if (r1 == 0) {
+            // Get the parent's ID
+            id parent33 = findReminder(store, parentTitle, testListName);
+            NSString *parentID33 = objectIDToString(((id (*)(id, SEL))objc_msgSend)(parent33, sel_registerName("objectID")));
+
+            // Get the original reminder's ID before reparenting
+            id orig33 = findReminder(store, reparentTitle, testListName);
+            NSString *origID33 = objectIDToString(((id (*)(id, SEL))objc_msgSend)(orig33, sel_registerName("objectID")));
+
+            // Now add with same title + parent-id — should reparent, not duplicate
+            int r2 = cmdAdd(store, reparentTitle, testListName, @{@"parent-id": parentID33});
+            if (r2 == 0) {
+                id reparented = findReminder(store, reparentTitle, testListName);
+                if (reparented) {
+                    NSString *reparentedID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(reparented, sel_registerName("objectID")));
+                    id reparentedParentID = ((id (*)(id, SEL))objc_msgSend)(reparented, sel_registerName("parentReminderID"));
+                    id parentOID33 = ((id (*)(id, SEL))objc_msgSend)(parent33, sel_registerName("objectID"));
+
+                    // Verify: same ID (not a new copy) and correctly parented
+                    BOOL sameID = [reparentedID isEqualToString:origID33];
+                    BOOL correctParent = reparentedParentID && [objectIDToString(reparentedParentID) isEqualToString:objectIDToString(parentOID33)];
+
+                    // Verify: no duplicate created (should still be exactly 1 match)
+                    NSArray *allMatches = findIncompleteByExactTitle(store, reparentTitle, testListName);
+                    BOOL noDuplicate = (allMatches.count == 1);
+
+                    if (sameID && correctParent && noDuplicate) {
+                        fprintf(stderr, "  PASS\n"); passed++;
+                    } else {
+                        fprintf(stderr, "  FAIL (sameID=%d correctParent=%d noDuplicate=%d count=%lu)\n",
+                            sameID, correctParent, noDuplicate, (unsigned long)allMatches.count); failed++;
+                    }
+                } else { fprintf(stderr, "  FAIL (not found after reparent)\n"); failed++; }
+                // Clean up the reparented reminder
+                id cleanup33 = findReminder(store, reparentTitle, testListName);
+                if (cleanup33) {
+                    NSString *cleanupID33 = objectIDToString(((id (*)(id, SEL))objc_msgSend)(cleanup33, sel_registerName("objectID")));
+                    cmdDelete(store, testListName, cleanupID33);
+                }
+            } else { fprintf(stderr, "  FAIL (reparent cmdAdd returned %d)\n", r2); failed++; }
+        } else { fprintf(stderr, "  FAIL (initial cmdAdd returned %d)\n", r1); failed++; }
+    }
+
     // Cleanup
-    // Test 33: cmdDelete child
+    // Test 34: cmdDelete child
     fprintf(stderr, "Test 29: cmdDelete child...\n");
     {
         id rem29 = findReminder(store, childTitle, testListName);
