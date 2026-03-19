@@ -4,6 +4,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <mach-o/dyld.h>
+#include <unistd.h>
 
 // --- Framework Loading ---
 
@@ -1082,6 +1083,79 @@ static int cmdBatch(id store) {
 
 // --- Tests ---
 
+// --- Test Helpers ---
+
+// Capture stdout from a block into an NSData buffer.
+// Uses a temp file to avoid pipe buffer deadlocks on large output.
+static NSData *captureStdout(void (^block)(void)) {
+    fflush(stdout);
+    char tmpl[] = "/tmp/remcli-test-XXXXXX";
+    int tmpfd = mkstemp(tmpl);
+    if (tmpfd < 0) return nil;
+    unlink(tmpl);
+
+    int savedStdout = dup(STDOUT_FILENO);
+    if (savedStdout < 0) { close(tmpfd); return nil; }
+    if (dup2(tmpfd, STDOUT_FILENO) < 0) { close(tmpfd); close(savedStdout); return nil; }
+    close(tmpfd);
+
+    block();
+    fflush(stdout);
+
+    tmpfd = dup(STDOUT_FILENO);
+    if (tmpfd < 0) { dup2(savedStdout, STDOUT_FILENO); close(savedStdout); return nil; }
+    if (dup2(savedStdout, STDOUT_FILENO) < 0) { close(tmpfd); close(savedStdout); return nil; }
+    close(savedStdout);
+
+    lseek(tmpfd, 0, SEEK_SET);
+    NSMutableData *buf = [NSMutableData data];
+    char tmp[4096];
+    ssize_t n;
+    while ((n = read(tmpfd, tmp, sizeof(tmp))) > 0) {
+        [buf appendBytes:tmp length:n];
+    }
+    close(tmpfd);
+    return buf;
+}
+
+// Parse captured stdout as JSON. Returns nil on failure.
+// Logs parse errors to stderr for debuggability.
+static id parseJSONFromData(NSData *data) {
+    if (!data || data.length == 0) return nil;
+    NSError *err = nil;
+    id result = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
+    if (err) fprintf(stderr, "  JSON parse error: %s\n", [[err localizedDescription] UTF8String]);
+    return result;
+}
+
+// Check that a JSON array contains at least one dict with the given key.
+static BOOL jsonArrayHasKey(NSArray *arr, NSString *key) {
+    for (NSDictionary *item in arr) {
+        if ([item isKindOfClass:[NSDictionary class]] && item[key] != nil) return YES;
+    }
+    return NO;
+}
+
+// Check that ALL dicts in a JSON array have the given key.
+static BOOL jsonArrayAllHaveKey(NSArray *arr, NSString *key) {
+    if (arr.count == 0) return NO;
+    for (id item in arr) {
+        if (![item isKindOfClass:[NSDictionary class]] || ((NSDictionary *)item)[key] == nil) return NO;
+    }
+    return YES;
+}
+
+// Find the first dict in a JSON array with a matching value for a key.
+static NSDictionary *jsonArrayFind(NSArray *arr, NSString *key, NSString *value) {
+    for (id item in arr) {
+        if ([item isKindOfClass:[NSDictionary class]]) {
+            id v = ((NSDictionary *)item)[key];
+            if ([v isKindOfClass:[NSString class]] && [v isEqualToString:value]) return item;
+        }
+    }
+    return nil;
+}
+
 static int cmdTest(id store) {
     int passed = 0, failed = 0;
     NSString *testListName = @"__remcli_test_list__";
@@ -1108,17 +1182,47 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 1: cmdCreateList...\n");
     { int r = cmdCreateList(store, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; return 1; } }
 
-    // Test 2: cmdLists
-    fprintf(stderr, "Test 2: cmdLists...\n");
-    { int r = cmdLists(store); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+    // Test 2: cmdLists (verify JSON output shape)
+    fprintf(stderr, "Test 2: cmdLists JSON shape...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdLists(store); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not a JSON array)\n"); failed++;
+            } else if (!jsonArrayAllHaveKey(json, @"name") || !jsonArrayAllHaveKey(json, @"id")) {
+                fprintf(stderr, "  FAIL (not all items have 'name' and 'id')\n"); failed++;
+            } else if (!jsonArrayFind(json, @"name", testListName)) {
+                fprintf(stderr, "  FAIL (test list not found in output)\n"); failed++;
+            } else { fprintf(stderr, "  PASS\n"); passed++; }
+        }
+    }
 
     // Test 3: cmdAdd
     fprintf(stderr, "Test 3: cmdAdd...\n");
     { int r = cmdAdd(store, parentTitle, testListName, @{@"notes": @"Test notes", @"priority": @"5"}); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 4: cmdGet
-    fprintf(stderr, "Test 4: cmdGet...\n");
-    { int r = cmdGet(store, parentTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+    // Test 4: cmdGet (verify JSON output shape)
+    fprintf(stderr, "Test 4: cmdGet JSON shape...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSDictionary class]]) {
+                fprintf(stderr, "  FAIL (not a JSON object)\n"); failed++;
+            } else {
+                NSDictionary *dict = json;
+                BOOL ok = dict[@"title"] && dict[@"id"] && dict[@"completed"] != nil
+                    && dict[@"priority"] != nil && dict[@"createdAt"] && dict[@"modifiedAt"];
+                if (ok) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (missing expected fields)\n"); failed++; }
+            }
+        }
+    }
 
     // Test 5: cmdUpdate (change notes, priority, flagged)
     fprintf(stderr, "Test 5: cmdUpdate...\n");
@@ -1200,9 +1304,24 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 13: cmdList
-    fprintf(stderr, "Test 13: cmdList...\n");
-    { int r = cmdList(store, testListName, NO); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+    // Test 13: cmdList (verify JSON output shape)
+    fprintf(stderr, "Test 13: cmdList JSON shape...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not a JSON array)\n"); failed++;
+            } else if (!jsonArrayAllHaveKey(json, @"title") || !jsonArrayAllHaveKey(json, @"id")
+                    || !jsonArrayAllHaveKey(json, @"completed") || !jsonArrayAllHaveKey(json, @"priority")) {
+                fprintf(stderr, "  FAIL (not all items have expected fields)\n"); failed++;
+            } else if (!jsonArrayFind(json, @"title", parentTitle)) {
+                fprintf(stderr, "  FAIL (parent reminder not found in output)\n"); failed++;
+            } else { fprintf(stderr, "  PASS\n"); passed++; }
+        }
+    }
 
     // Test 14: JSON shape
     fprintf(stderr, "Test 14: JSON shape...\n");
@@ -1254,9 +1373,28 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 17: cmdSubtasks
-    fprintf(stderr, "Test 17: cmdSubtasks...\n");
-    { int r = cmdSubtasks(store, parentTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+    // Test 17: cmdSubtasks (verify JSON output shape)
+    fprintf(stderr, "Test 17: cmdSubtasks JSON shape...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdSubtasks(store, parentTitle, testListName); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not a JSON array)\n"); failed++;
+            } else {
+                NSArray *arr = json;
+                if (arr.count == 0) {
+                    fprintf(stderr, "  FAIL (empty array, expected subtasks)\n"); failed++;
+                } else if (!jsonArrayAllHaveKey(arr, @"title") || !jsonArrayAllHaveKey(arr, @"id")) {
+                    fprintf(stderr, "  FAIL (subtask items missing expected fields)\n"); failed++;
+                } else if (!jsonArrayFind(arr, @"title", childTitle)) {
+                    fprintf(stderr, "  FAIL (child reminder not found in subtasks)\n"); failed++;
+                } else { fprintf(stderr, "  PASS\n"); passed++; }
+            }
+        }
+    }
 
     // Test 18: Error path (not found)
     fprintf(stderr, "Test 18: Error path (not found)...\n");
