@@ -13,7 +13,10 @@ generate: generate-cli.py
 	./remkit-inspect 2>&1 | python3 generate-cli.py > reminderkit.m
 	$(MAKE) reminderkit
 
+install-hooks:
+	git config core.hooksPath .githooks
+
 clean:
 	rm -f reminderkit remkit-inspect
 
-.PHONY: all clean generate
+.PHONY: all clean generate install-hooks
