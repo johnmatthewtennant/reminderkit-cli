@@ -4,6 +4,8 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <mach-o/dyld.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 // --- Framework Loading ---
 
@@ -1432,27 +1434,149 @@ static int cmdTest(id store) {
         }
     }
 
+    // Error path tests (not found, invalid args)
+
+    // Test 29: findReminderByID returns nil for nonexistent ID
+    fprintf(stderr, "Test 29: findReminderByID not found...\n");
+    {
+        id notFound = findReminderByID(store, @"__nonexistent_id_999__");
+        if (!notFound) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL (should be nil)\n"); failed++; }
+    }
+
+    // Test 30: cmdGet exits non-zero for nonexistent title (via fork, since errorExit calls exit(1))
+    fprintf(stderr, "Test 30: cmdGet error path (not found)...\n");
+    {
+        pid_t pid = fork();
+        if (pid == 0) {
+            freopen("/dev/null", "w", stderr);
+            freopen("/dev/null", "w", stdout);
+            cmdGet(store, @"__nonexistent_reminder_999__", testListName);
+            _exit(0);
+        } else {
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
+        }
+    }
+
+    // Test 31: cmdUpdate exits non-zero for nonexistent ID
+    fprintf(stderr, "Test 31: cmdUpdate error path (not found)...\n");
+    {
+        pid_t pid = fork();
+        if (pid == 0) {
+            freopen("/dev/null", "w", stderr);
+            freopen("/dev/null", "w", stdout);
+            cmdUpdate(store, testListName, @{@"id": @"__nonexistent_id_999__"});
+            _exit(0);
+        } else {
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
+        }
+    }
+
+    // Test 32: cmdComplete exits non-zero for nonexistent ID
+    fprintf(stderr, "Test 32: cmdComplete error path (not found)...\n");
+    {
+        pid_t pid = fork();
+        if (pid == 0) {
+            freopen("/dev/null", "w", stderr);
+            freopen("/dev/null", "w", stdout);
+            cmdComplete(store, testListName, @"__nonexistent_id_999__");
+            _exit(0);
+        } else {
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
+        }
+    }
+
+    // Test 33: cmdDelete exits non-zero for nonexistent ID
+    fprintf(stderr, "Test 33: cmdDelete error path (not found)...\n");
+    {
+        pid_t pid = fork();
+        if (pid == 0) {
+            freopen("/dev/null", "w", stderr);
+            freopen("/dev/null", "w", stdout);
+            cmdDelete(store, testListName, @"__nonexistent_id_999__");
+            _exit(0);
+        } else {
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
+        }
+    }
+
+    // Test 34: cmdUpdate exits non-zero for conflicting --parent-id and --remove-parent
+    fprintf(stderr, "Test 34: cmdUpdate error path (conflicting parent flags)...\n");
+    {
+        id rem34 = findReminder(store, parentTitle, testListName);
+        NSString *rem34ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem34, sel_registerName("objectID")));
+        pid_t pid = fork();
+        if (pid == 0) {
+            freopen("/dev/null", "w", stderr);
+            freopen("/dev/null", "w", stdout);
+            cmdUpdate(store, testListName, @{@"id": rem34ID, @"parent-id": @"some-id", @"remove-parent": @"true"});
+            _exit(0);
+        } else {
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
+        }
+    }
+
+    // Test 35: cmdUpdate exits non-zero for conflicting --url and --clear-url
+    fprintf(stderr, "Test 35: cmdUpdate error path (conflicting url flags)...\n");
+    {
+        id rem35 = findReminder(store, parentTitle, testListName);
+        NSString *rem35ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem35, sel_registerName("objectID")));
+        pid_t pid = fork();
+        if (pid == 0) {
+            freopen("/dev/null", "w", stderr);
+            freopen("/dev/null", "w", stdout);
+            cmdUpdate(store, testListName, @{@"id": rem35ID, @"url": @"http://example.com", @"clear-url": @"true"});
+            _exit(0);
+        } else {
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
+        }
+    }
+
     // Cleanup
-    // Test 29: cmdDelete child
-    fprintf(stderr, "Test 29: cmdDelete child...\n");
+    // Test 36: cmdDelete child
+    fprintf(stderr, "Test 36: cmdDelete child...\n");
     {
-        id rem29 = findReminder(store, childTitle, testListName);
-        NSString *rem29ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem29, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem29ID);
+        id rem36 = findReminder(store, childTitle, testListName);
+        NSString *rem36ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem36, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem36ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 30: cmdDelete parent
-    fprintf(stderr, "Test 30: cmdDelete parent...\n");
+    // Test 37: cmdDelete parent
+    fprintf(stderr, "Test 37: cmdDelete parent...\n");
     {
-        id rem30 = findReminder(store, parentTitle, testListName);
-        NSString *rem30ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem30, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem30ID);
+        id rem37 = findReminder(store, parentTitle, testListName);
+        NSString *rem37ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem37, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem37ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 31: cmdDeleteList
-    fprintf(stderr, "Test 31: cmdDeleteList...\n");
+    // Test 38: cmdDeleteList
+    fprintf(stderr, "Test 38: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
