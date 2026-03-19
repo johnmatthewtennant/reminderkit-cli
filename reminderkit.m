@@ -6,6 +6,8 @@
 #include <mach-o/dyld.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <spawn.h>
+#include <fcntl.h>
 
 // --- Framework Loading ---
 
@@ -1084,6 +1086,71 @@ static int cmdBatch(id store) {
 
 // --- Tests ---
 
+// Helper: spawn the CLI binary with given args and assert it exits non-zero.
+// Returns 1 on PASS (command exited non-zero), 0 on FAIL.
+static int assertCliExitsNonZero(const char *testName, const char *argv[]) {
+    // Resolve our own binary path
+    char execPath[PATH_MAX];
+    uint32_t size = sizeof(execPath);
+    if (_NSGetExecutablePath(execPath, &size) != 0) {
+        fprintf(stderr, "  FAIL (%s: could not get executable path)\n", testName);
+        return 0;
+    }
+    char realPath[PATH_MAX];
+    if (!realpath(execPath, realPath)) {
+        fprintf(stderr, "  FAIL (%s: could not resolve executable path)\n", testName);
+        return 0;
+    }
+
+    // Build argv with binary path as argv[0]
+    // Count args
+    int argc = 0;
+    while (argv[argc]) argc++;
+    const char *spawnArgv[argc + 2];
+    spawnArgv[0] = realPath;
+    for (int i = 0; i <= argc; i++) spawnArgv[i + 1] = argv[i]; // includes trailing NULL
+
+    // Redirect stdout and stderr to /dev/null
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+
+    pid_t pid;
+    extern char **environ;
+    int spawnErr = posix_spawn(&pid, realPath, &actions, NULL, (char *const *)spawnArgv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+
+    if (spawnErr != 0) {
+        fprintf(stderr, "  FAIL (%s: posix_spawn failed: %s)\n", testName, strerror(spawnErr));
+        return 0;
+    }
+
+    // Wait with timeout (10 seconds)
+    int status;
+    for (int i = 0; i < 100; i++) {
+        pid_t result = waitpid(pid, &status, WNOHANG);
+        if (result == pid) {
+            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                return 1; // PASS: exited non-zero
+            } else {
+                fprintf(stderr, "  FAIL (%s: expected non-zero exit, got %d)\n", testName,
+                    WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+                return 0;
+            }
+        } else if (result < 0) {
+            fprintf(stderr, "  FAIL (%s: waitpid error: %s)\n", testName, strerror(errno));
+            return 0;
+        }
+        usleep(100000); // 100ms
+    }
+    // Timeout — kill and fail
+    kill(pid, SIGKILL);
+    waitpid(pid, &status, 0);
+    fprintf(stderr, "  FAIL (%s: timed out after 10s)\n", testName);
+    return 0;
+}
+
 static int cmdTest(id store) {
     int passed = 0, failed = 0;
     NSString *testListName = @"__remcli_test_list__";
@@ -1435,6 +1502,9 @@ static int cmdTest(id store) {
     }
 
     // Error path tests (not found, invalid args)
+    // Uses posix_spawn to invoke the CLI binary directly, avoiding fork-safety
+    // issues with Objective-C runtime. Each test spawns a fresh process with
+    // a 10-second timeout via assertCliExitsNonZero().
 
     // Test 29: findReminderByID returns nil for nonexistent ID
     fprintf(stderr, "Test 29: findReminderByID not found...\n");
@@ -1444,139 +1514,101 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (should be nil)\n"); failed++; }
     }
 
-    // Test 30: cmdGet exits non-zero for nonexistent title (via fork, since errorExit calls exit(1))
-    fprintf(stderr, "Test 30: cmdGet error path (not found)...\n");
+    // Test 30: get exits non-zero for nonexistent title
+    fprintf(stderr, "Test 30: get error path (not found)...\n");
     {
-        pid_t pid = fork();
-        if (pid == 0) {
-            freopen("/dev/null", "w", stderr);
-            freopen("/dev/null", "w", stdout);
-            cmdGet(store, @"__nonexistent_reminder_999__", testListName);
-            _exit(0);
-        } else {
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-                fprintf(stderr, "  PASS\n"); passed++;
-            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
-        }
+        const char *args[] = {"get", "--title", "__nonexistent_reminder_999__", "--list", [testListName UTF8String], NULL};
+        if (assertCliExitsNonZero("get not found", args)) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { failed++; }
     }
 
-    // Test 31: cmdUpdate exits non-zero for nonexistent ID
-    fprintf(stderr, "Test 31: cmdUpdate error path (not found)...\n");
+    // Test 31: update exits non-zero for nonexistent ID
+    fprintf(stderr, "Test 31: update error path (not found)...\n");
     {
-        pid_t pid = fork();
-        if (pid == 0) {
-            freopen("/dev/null", "w", stderr);
-            freopen("/dev/null", "w", stdout);
-            cmdUpdate(store, testListName, @{@"id": @"__nonexistent_id_999__"});
-            _exit(0);
-        } else {
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-                fprintf(stderr, "  PASS\n"); passed++;
-            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
-        }
+        const char *args[] = {"update", "--id", "__nonexistent_id_999__", NULL};
+        if (assertCliExitsNonZero("update not found", args)) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { failed++; }
     }
 
-    // Test 32: cmdComplete exits non-zero for nonexistent ID
-    fprintf(stderr, "Test 32: cmdComplete error path (not found)...\n");
+    // Test 32: complete exits non-zero for nonexistent ID
+    fprintf(stderr, "Test 32: complete error path (not found)...\n");
     {
-        pid_t pid = fork();
-        if (pid == 0) {
-            freopen("/dev/null", "w", stderr);
-            freopen("/dev/null", "w", stdout);
-            cmdComplete(store, testListName, @"__nonexistent_id_999__");
-            _exit(0);
-        } else {
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-                fprintf(stderr, "  PASS\n"); passed++;
-            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
-        }
+        const char *args[] = {"complete", "--id", "__nonexistent_id_999__", NULL};
+        if (assertCliExitsNonZero("complete not found", args)) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { failed++; }
     }
 
-    // Test 33: cmdDelete exits non-zero for nonexistent ID
-    fprintf(stderr, "Test 33: cmdDelete error path (not found)...\n");
+    // Test 33: delete exits non-zero for nonexistent ID
+    fprintf(stderr, "Test 33: delete error path (not found)...\n");
     {
-        pid_t pid = fork();
-        if (pid == 0) {
-            freopen("/dev/null", "w", stderr);
-            freopen("/dev/null", "w", stdout);
-            cmdDelete(store, testListName, @"__nonexistent_id_999__");
-            _exit(0);
-        } else {
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-                fprintf(stderr, "  PASS\n"); passed++;
-            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
-        }
+        const char *args[] = {"delete", "--id", "__nonexistent_id_999__", NULL};
+        if (assertCliExitsNonZero("delete not found", args)) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { failed++; }
     }
 
-    // Test 34: cmdUpdate exits non-zero for conflicting --parent-id and --remove-parent
-    fprintf(stderr, "Test 34: cmdUpdate error path (conflicting parent flags)...\n");
+    // Test 34: update exits non-zero for conflicting --parent-id and --remove-parent
+    fprintf(stderr, "Test 34: update error path (conflicting parent flags)...\n");
     {
         id rem34 = findReminder(store, parentTitle, testListName);
-        NSString *rem34ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem34, sel_registerName("objectID")));
-        pid_t pid = fork();
-        if (pid == 0) {
-            freopen("/dev/null", "w", stderr);
-            freopen("/dev/null", "w", stdout);
-            cmdUpdate(store, testListName, @{@"id": rem34ID, @"parent-id": @"some-id", @"remove-parent": @"true"});
-            _exit(0);
-        } else {
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-                fprintf(stderr, "  PASS\n"); passed++;
-            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
+        if (!rem34) { fprintf(stderr, "  FAIL (test reminder not found)\n"); failed++; }
+        else {
+            NSString *rem34ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem34, sel_registerName("objectID")));
+            const char *args[] = {"update", "--id", [rem34ID UTF8String], "--parent-id", "some-id", "--remove-parent", NULL};
+            if (assertCliExitsNonZero("update conflicting parent flags", args)) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { failed++; }
         }
     }
 
-    // Test 35: cmdUpdate exits non-zero for conflicting --url and --clear-url
-    fprintf(stderr, "Test 35: cmdUpdate error path (conflicting url flags)...\n");
+    // Test 35: update exits non-zero for conflicting --url and --clear-url
+    fprintf(stderr, "Test 35: update error path (conflicting url flags)...\n");
     {
         id rem35 = findReminder(store, parentTitle, testListName);
-        NSString *rem35ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem35, sel_registerName("objectID")));
-        pid_t pid = fork();
-        if (pid == 0) {
-            freopen("/dev/null", "w", stderr);
-            freopen("/dev/null", "w", stdout);
-            cmdUpdate(store, testListName, @{@"id": rem35ID, @"url": @"http://example.com", @"clear-url": @"true"});
-            _exit(0);
-        } else {
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-                fprintf(stderr, "  PASS\n"); passed++;
-            } else { fprintf(stderr, "  FAIL (expected non-zero exit)\n"); failed++; }
+        if (!rem35) { fprintf(stderr, "  FAIL (test reminder not found)\n"); failed++; }
+        else {
+            NSString *rem35ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem35, sel_registerName("objectID")));
+            const char *args[] = {"update", "--id", [rem35ID UTF8String], "--url", "http://example.com", "--clear-url", NULL};
+            if (assertCliExitsNonZero("update conflicting url flags", args)) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { failed++; }
         }
+    }
+
+    // Test 36: add-tag exits non-zero without required --tag
+    fprintf(stderr, "Test 36: add-tag error path (missing --tag)...\n");
+    {
+        const char *args[] = {"add-tag", "--id", "some-id", NULL};
+        if (assertCliExitsNonZero("add-tag missing --tag", args)) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { failed++; }
+    }
+
+    // Test 37: add exits non-zero without required --title
+    fprintf(stderr, "Test 37: add error path (missing --title)...\n");
+    {
+        const char *args[] = {"add", "--list", "SomeList", NULL};
+        if (assertCliExitsNonZero("add missing --title", args)) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { failed++; }
     }
 
     // Cleanup
-    // Test 36: cmdDelete child
-    fprintf(stderr, "Test 36: cmdDelete child...\n");
+    // Test 38: cmdDelete child
+    fprintf(stderr, "Test 38: cmdDelete child...\n");
     {
-        id rem36 = findReminder(store, childTitle, testListName);
-        NSString *rem36ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem36, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem36ID);
+        id rem38 = findReminder(store, childTitle, testListName);
+        NSString *rem38ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem38, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem38ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 37: cmdDelete parent
-    fprintf(stderr, "Test 37: cmdDelete parent...\n");
+    // Test 39: cmdDelete parent
+    fprintf(stderr, "Test 39: cmdDelete parent...\n");
     {
-        id rem37 = findReminder(store, parentTitle, testListName);
-        NSString *rem37ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem37, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem37ID);
+        id rem39 = findReminder(store, parentTitle, testListName);
+        NSString *rem39ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem39, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem39ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 38: cmdDeleteList
-    fprintf(stderr, "Test 38: cmdDeleteList...\n");
+    // Test 40: cmdDeleteList
+    fprintf(stderr, "Test 40: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
