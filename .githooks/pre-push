@@ -1,6 +1,6 @@
 #!/bin/bash
-# Pre-push hook: verify generator output matches committed reminderkit.m
-# Fails if `make generate` would change reminderkit.m, indicating the
+# Pre-push hook: verify generator output matches committed reminderkit-generated.m
+# Fails if `make generate` would change reminderkit-generated.m, indicating the
 # generator and source are out of sync.
 
 set -e
@@ -10,17 +10,14 @@ echo "pre-push: checking generator sync..."
 # Run the generator
 make generate >/dev/null 2>&1
 
-# Check if reminderkit.m has uncommitted changes
-if ! git diff --quiet reminderkit.m; then
-    echo "ERROR: reminderkit.m has uncommitted changes after 'make generate'."
-    echo "The generator (generate-cli.py) and reminderkit.m are out of sync."
+# Check if reminderkit-generated.m has uncommitted changes
+if ! git diff --quiet reminderkit-generated.m; then
+    echo "ERROR: reminderkit-generated.m has uncommitted changes after 'make generate'."
+    echo "The generator (generate-cli.py) and reminderkit-generated.m are out of sync."
     echo ""
     echo "Either:"
     echo "  1. Run 'make generate' and commit the result, or"
-    echo "  2. Update generate-cli.py to match manual changes in reminderkit.m"
-    echo ""
-    # Restore the committed version so we don't leave dirty state
-    git checkout reminderkit.m
+    echo "  2. Update generate-cli.py to match manual changes in reminderkit-generated.m"
     exit 1
 fi
 
