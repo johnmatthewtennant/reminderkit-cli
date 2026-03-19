@@ -1,4 +1,11 @@
 // reminderkit.m — assembled from generated + handwritten + test files
+//
+// Include order matters: each file depends on symbols from earlier includes.
+//   1. generated  — provides helpers, framework loading, config-driven commands
+//   2. handwritten — provides cmdBatch, cmdInstallSkill (uses helpers from generated)
+//   3. tests       — provides cmdTest + test helpers (uses commands from both)
+//
+// usage() and main() follow the includes so they can reference all symbols.
 #include "reminderkit-generated.m"
 #include "reminderkit-handwritten.m"
 #include "reminderkit-tests.m"

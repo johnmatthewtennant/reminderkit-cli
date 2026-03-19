@@ -978,6 +978,8 @@ def generate_add_setters():
     return '\n'.join(lines)
 
 
+# --- Legacy emitters (not called by main(), kept for re-scaffolding) ---
+
 def generate_batch_command():
     return '''
 static int cmdBatch(id store) {
