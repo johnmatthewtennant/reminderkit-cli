@@ -4,6 +4,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <mach-o/dyld.h>
+#include <unistd.h>
 
 // --- Framework Loading ---
 
@@ -740,11 +741,19 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
         errorExit(@"Cannot use --url and --clear-url together");
     }
 
-    // Validate conflicting parent flags
+    // Resolve --parent (title) to parent-id
     NSString *parentID = opts[@"parent-id"];
+    if (opts[@"parent"]) {
+        if (parentID) errorExit(@"Cannot specify both --parent and --parent-id");
+        id parentByTitle = findReminder(store, opts[@"parent"], listName);
+        if (!parentByTitle) errorExit([NSString stringWithFormat:@"Parent not found with title: %@", opts[@"parent"]]);
+        parentID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(parentByTitle, sel_registerName("objectID")));
+    }
+
+    // Validate conflicting parent flags
     BOOL removeParent = opts[@"remove-parent"] != nil;
     if (parentID && removeParent) {
-        errorExit(@"Cannot specify both --parent-id and --remove-parent");
+        errorExit(@"Cannot specify both --parent-id/--parent and --remove-parent");
     }
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
@@ -1082,6 +1091,46 @@ static int cmdBatch(id store) {
 
 // --- Tests ---
 
+// --- Test Helpers ---
+
+// Capture stdout from a block into an NSData buffer.
+static NSData *captureStdout(void (^block)(void)) {
+    fflush(stdout);
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return nil;
+    int savedStdout = dup(STDOUT_FILENO);
+    if (savedStdout < 0) { close(pipefd[0]); close(pipefd[1]); return nil; }
+    dup2(pipefd[1], STDOUT_FILENO);
+    close(pipefd[1]);
+
+    block();
+    fflush(stdout);
+
+    dup2(savedStdout, STDOUT_FILENO);
+    close(savedStdout);
+
+    NSMutableData *buf = [NSMutableData data];
+    char tmp[4096];
+    ssize_t n;
+    while ((n = read(pipefd[0], tmp, sizeof(tmp))) > 0) {
+        [buf appendBytes:tmp length:n];
+    }
+    close(pipefd[0]);
+    return buf;
+}
+
+static id parseJSONFromData(NSData *data) {
+    if (!data || data.length == 0) return nil;
+    return [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+}
+
+static BOOL jsonArrayHasKey(NSArray *arr, NSString *key) {
+    for (NSDictionary *item in arr) {
+        if ([item isKindOfClass:[NSDictionary class]] && item[key] != nil) return YES;
+    }
+    return NO;
+}
+
 static int cmdTest(id store) {
     int passed = 0, failed = 0;
     NSString *testListName = @"__remcli_test_list__";
@@ -1108,17 +1157,45 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 1: cmdCreateList...\n");
     { int r = cmdCreateList(store, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; return 1; } }
 
-    // Test 2: cmdLists
-    fprintf(stderr, "Test 2: cmdLists...\n");
-    { int r = cmdLists(store); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+    // Test 2: cmdLists (verify JSON output shape)
+    fprintf(stderr, "Test 2: cmdLists JSON shape...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdLists(store); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not a JSON array)\n"); failed++;
+            } else if (!jsonArrayHasKey(json, @"name") || !jsonArrayHasKey(json, @"id")) {
+                fprintf(stderr, "  FAIL (missing 'name' or 'id' keys)\n"); failed++;
+            } else { fprintf(stderr, "  PASS\n"); passed++; }
+        }
+    }
 
     // Test 3: cmdAdd
     fprintf(stderr, "Test 3: cmdAdd...\n");
     { int r = cmdAdd(store, parentTitle, testListName, @{@"notes": @"Test notes", @"priority": @"5"}); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 4: cmdGet
-    fprintf(stderr, "Test 4: cmdGet...\n");
-    { int r = cmdGet(store, parentTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+    // Test 4: cmdGet (verify JSON output shape)
+    fprintf(stderr, "Test 4: cmdGet JSON shape...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSDictionary class]]) {
+                fprintf(stderr, "  FAIL (not a JSON object)\n"); failed++;
+            } else {
+                NSDictionary *dict = json;
+                BOOL ok = dict[@"title"] && dict[@"id"] && dict[@"completed"] != nil
+                    && dict[@"priority"] != nil && dict[@"createdAt"] && dict[@"modifiedAt"];
+                if (ok) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (missing expected fields)\n"); failed++; }
+            }
+        }
+    }
 
     // Test 5: cmdUpdate (change notes, priority, flagged)
     fprintf(stderr, "Test 5: cmdUpdate...\n");
@@ -1200,9 +1277,22 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 13: cmdList
-    fprintf(stderr, "Test 13: cmdList...\n");
-    { int r = cmdList(store, testListName, NO); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+    // Test 13: cmdList (verify JSON output shape)
+    fprintf(stderr, "Test 13: cmdList JSON shape...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not a JSON array)\n"); failed++;
+            } else if (!jsonArrayHasKey(json, @"title") || !jsonArrayHasKey(json, @"id")
+                    || !jsonArrayHasKey(json, @"completed") || !jsonArrayHasKey(json, @"priority")) {
+                fprintf(stderr, "  FAIL (missing expected fields)\n"); failed++;
+            } else { fprintf(stderr, "  PASS\n"); passed++; }
+        }
+    }
 
     // Test 14: JSON shape
     fprintf(stderr, "Test 14: JSON shape...\n");
@@ -1254,9 +1344,26 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 17: cmdSubtasks
-    fprintf(stderr, "Test 17: cmdSubtasks...\n");
-    { int r = cmdSubtasks(store, parentTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+    // Test 17: cmdSubtasks (verify JSON output shape)
+    fprintf(stderr, "Test 17: cmdSubtasks JSON shape...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdSubtasks(store, parentTitle, testListName); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not a JSON array)\n"); failed++;
+            } else {
+                NSArray *arr = json;
+                if (arr.count == 0) {
+                    fprintf(stderr, "  FAIL (empty array, expected subtasks)\n"); failed++;
+                } else if (!jsonArrayHasKey(arr, @"title") || !jsonArrayHasKey(arr, @"id")) {
+                    fprintf(stderr, "  FAIL (subtask missing expected fields)\n"); failed++;
+                } else { fprintf(stderr, "  PASS\n"); passed++; }
+            }
+        }
+    }
 
     // Test 18: Error path (not found)
     fprintf(stderr, "Test 18: Error path (not found)...\n");
@@ -1554,7 +1661,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit get --title <title> [--list <name>]  (alias for search)\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
-    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
+    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--parent <title>] [--to-list <name>]\n");
     fprintf(stderr, "  reminderkit complete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\n");
