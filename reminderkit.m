@@ -4,6 +4,8 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <mach-o/dyld.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 // --- Framework Loading ---
 
@@ -1082,6 +1084,49 @@ static int cmdBatch(id store) {
 
 // --- Tests ---
 
+// --- Test Helpers ---
+
+// Capture stdout from a block into an NSData buffer.
+// Returns nil on pipe/dup failure.
+static NSData *captureStdout(void (^block)(void)) {
+    fflush(stdout);
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return nil;
+    int savedStdout = dup(STDOUT_FILENO);
+    if (savedStdout < 0) { close(pipefd[0]); close(pipefd[1]); return nil; }
+    dup2(pipefd[1], STDOUT_FILENO);
+    close(pipefd[1]);
+
+    block();
+    fflush(stdout);
+
+    dup2(savedStdout, STDOUT_FILENO);
+    close(savedStdout);
+
+    NSMutableData *buf = [NSMutableData data];
+    char tmp[4096];
+    ssize_t n;
+    while ((n = read(pipefd[0], tmp, sizeof(tmp))) > 0) {
+        [buf appendBytes:tmp length:n];
+    }
+    close(pipefd[0]);
+    return buf;
+}
+
+// Parse captured stdout as JSON. Returns nil on failure.
+static id parseJSONFromData(NSData *data) {
+    if (!data || data.length == 0) return nil;
+    return [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+}
+
+// Check that a JSON array contains at least one dict with the given key.
+static BOOL jsonArrayHasKey(NSArray *arr, NSString *key) {
+    for (NSDictionary *item in arr) {
+        if ([item isKindOfClass:[NSDictionary class]] && item[key] != nil) return YES;
+    }
+    return NO;
+}
+
 static int cmdTest(id store) {
     int passed = 0, failed = 0;
     NSString *testListName = @"__remcli_test_list__";
@@ -1108,9 +1153,21 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 1: cmdCreateList...\n");
     { int r = cmdCreateList(store, testListName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; return 1; } }
 
-    // Test 2: cmdLists
-    fprintf(stderr, "Test 2: cmdLists...\n");
-    { int r = cmdLists(store); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+    // Test 2: cmdLists (verify JSON output shape)
+    fprintf(stderr, "Test 2: cmdLists JSON shape...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdLists(store); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not a JSON array)\n"); failed++;
+            } else if (!jsonArrayHasKey(json, @"name") || !jsonArrayHasKey(json, @"id")) {
+                fprintf(stderr, "  FAIL (missing 'name' or 'id' keys)\n"); failed++;
+            } else { fprintf(stderr, "  PASS\n"); passed++; }
+        }
+    }
 
     // Test 3: cmdAdd
     fprintf(stderr, "Test 3: cmdAdd...\n");
@@ -1432,8 +1489,67 @@ static int cmdTest(id store) {
         }
     }
 
+    // Test 29: cmdCreateSection
+    fprintf(stderr, "Test 29: cmdCreateSection...\n");
+    {
+        NSString *sectionName = @"__remcli_test_section__";
+        int r = cmdCreateSection(store, testListName, sectionName);
+        if (r == 0) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 30: cmdListSections (verify section appears)
+    fprintf(stderr, "Test 30: cmdListSections...\n");
+    {
+        // Call cmdListSections to verify it runs, then check via the list's sections directly
+        int r = cmdListSections(store, testListName);
+        if (r == 0) {
+            id testList30 = findList(store, testListName);
+            id sections = ((id (*)(id, SEL))objc_msgSend)(testList30, sel_registerName("sections"));
+            BOOL found = NO;
+            for (id section in sections) {
+                NSString *name = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("canonicalName"));
+                if ([name isEqualToString:@"__remcli_test_section__"]) { found = YES; break; }
+            }
+            if (found) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (section not found in list)\n"); failed++; }
+        } else { fprintf(stderr, "  FAIL (cmdListSections returned %d)\n", r); failed++; }
+    }
+
+    // Test 31: cmdUpdate --due-date
+    fprintf(stderr, "Test 31: cmdUpdate --due-date...\n");
+    {
+        id rem31 = findReminder(store, parentTitle, testListName);
+        NSString *rem31ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem31, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem31ID, @"due-date": @"2099-12-31"});
+        if (r == 0) {
+            id updated = findReminder(store, parentTitle, testListName);
+            NSDictionary *dict = reminderToDict(updated);
+            NSString *dueDate = dict[@"dueDate"];
+            if (dueDate && [dueDate hasPrefix:@"2099-12-31"]) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (dueDate=%s)\n", [dueDate UTF8String]); failed++; }
+        } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
+    // Test 32: cmdUpdate --start-date
+    fprintf(stderr, "Test 32: cmdUpdate --start-date...\n");
+    {
+        id rem32 = findReminder(store, parentTitle, testListName);
+        NSString *rem32ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem32, sel_registerName("objectID")));
+        int r = cmdUpdate(store, testListName, @{@"id": rem32ID, @"start-date": @"2099-01-15"});
+        if (r == 0) {
+            id updated = findReminder(store, parentTitle, testListName);
+            NSDictionary *dict = reminderToDict(updated);
+            NSString *startDate = dict[@"startDate"];
+            if (startDate && [startDate hasPrefix:@"2099-01-15"]) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else { fprintf(stderr, "  FAIL (startDate=%s)\n", [startDate UTF8String]); failed++; }
+        } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    }
+
     // Cleanup
-    // Test 29: cmdDelete child
+    // Test 33: cmdDelete child
     fprintf(stderr, "Test 29: cmdDelete child...\n");
     {
         id rem29 = findReminder(store, childTitle, testListName);
