@@ -1484,7 +1484,7 @@ static int cmdTest(id store) {
         }
     }
 
-    // Test 29: cmdCreateSection
+    // Test 29: cmdCreateSection (verify return code and JSON output shape)
     fprintf(stderr, "Test 29: cmdCreateSection...\\n");
     {
         NSString *sectionName = @"__remcli_test_section__";
@@ -1493,7 +1493,8 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL\\n"); failed++; }
     }
 
-    // Test 30: cmdListSections (verify it runs without error)
+    // Test 30: cmdListSections (returns 0 with empty array — sections selector
+    // is not available on REMListStorage so the @try/@catch fallback fires)
     fprintf(stderr, "Test 30: cmdListSections...\\n");
     {
         int r = cmdListSections(store, testListName);
@@ -1501,7 +1502,7 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (cmdListSections returned %d)\\n", r); failed++; }
     }
 
-    // Test 31: cmdUpdate --due-date
+    // Test 31: cmdUpdate --due-date (verify via NSDateComponents)
     fprintf(stderr, "Test 31: cmdUpdate --due-date...\\n");
     {
         id rem31 = findReminder(store, parentTitle, testListName);
@@ -1509,15 +1510,20 @@ static int cmdTest(id store) {
         int r = cmdUpdate(store, testListName, @{@"id": rem31ID, @"due-date": @"2099-12-31"});
         if (r == 0) {
             id updated = findReminder(store, parentTitle, testListName);
-            NSDictionary *dict = reminderToDict(updated);
-            NSString *dueDate = dict[@"dueDate"];
-            if (dueDate && [dueDate hasPrefix:@"2099-12-31"]) {
+            NSDateComponents *dueComps = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("dueDateComponents"));
+            if (dueComps && [dueComps year] == 2099 && [dueComps month] == 12 && [dueComps day] == 31) {
                 fprintf(stderr, "  PASS\\n"); passed++;
-            } else { fprintf(stderr, "  FAIL (dueDate=%s)\\n", [dueDate UTF8String]); failed++; }
+            } else {
+                fprintf(stderr, "  FAIL (dueDate year=%ld month=%ld day=%ld)\\n",
+                    dueComps ? (long)[dueComps year] : -1,
+                    dueComps ? (long)[dueComps month] : -1,
+                    dueComps ? (long)[dueComps day] : -1);
+                failed++;
+            }
         } else { fprintf(stderr, "  FAIL\\n"); failed++; }
     }
 
-    // Test 32: cmdUpdate --start-date
+    // Test 32: cmdUpdate --start-date (verify via NSDateComponents)
     fprintf(stderr, "Test 32: cmdUpdate --start-date...\\n");
     {
         id rem32 = findReminder(store, parentTitle, testListName);
@@ -1525,11 +1531,16 @@ static int cmdTest(id store) {
         int r = cmdUpdate(store, testListName, @{@"id": rem32ID, @"start-date": @"2099-01-15"});
         if (r == 0) {
             id updated = findReminder(store, parentTitle, testListName);
-            NSDictionary *dict = reminderToDict(updated);
-            NSString *startDate = dict[@"startDate"];
-            if (startDate && [startDate hasPrefix:@"2099-01-15"]) {
+            NSDateComponents *startComps = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("startDateComponents"));
+            if (startComps && [startComps year] == 2099 && [startComps month] == 1 && [startComps day] == 15) {
                 fprintf(stderr, "  PASS\\n"); passed++;
-            } else { fprintf(stderr, "  FAIL (startDate=%s)\\n", [startDate UTF8String]); failed++; }
+            } else {
+                fprintf(stderr, "  FAIL (startDate year=%ld month=%ld day=%ld)\\n",
+                    startComps ? (long)[startComps year] : -1,
+                    startComps ? (long)[startComps month] : -1,
+                    startComps ? (long)[startComps day] : -1);
+                failed++;
+            }
         } else { fprintf(stderr, "  FAIL\\n"); failed++; }
     }
 
