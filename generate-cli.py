@@ -791,8 +791,7 @@ def generate_update_command():
         '    NSString *parentID = opts[@"parent-id"];',
         '    if (opts[@"parent"]) {',
         '        if (parentID) errorExit(@"Cannot specify both --parent and --parent-id");',
-        '        id parentByTitle = findReminder(store, opts[@"parent"], listName);',
-        '        if (!parentByTitle) errorExit([NSString stringWithFormat:@"Parent not found with title: %@", opts[@"parent"]]);',
+        '        id parentByTitle = requireUniqueReminder(store, opts[@"parent"], listName);',
         '        parentID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(parentByTitle, sel_registerName("objectID")));',
         '    }',
         '',
@@ -800,6 +799,9 @@ def generate_update_command():
         '    BOOL removeParent = opts[@"remove-parent"] != nil;',
         '    if (parentID && removeParent) {',
         '        errorExit(@"Cannot specify both --parent-id/--parent and --remove-parent");',
+        '    }',
+        '    if (parentID && opts[@"to-list"]) {',
+        '        errorExit(@"Cannot combine --parent-id/--parent with --to-list (parent must be in the same list)");',
         '    }',
         '',
         '    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(',
@@ -997,7 +999,7 @@ static int cmdBatch(id store) {
     NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
         @"notes", @"priority", @"flagged", @"completed",
         @"due-date", @"start-date", @"url", @"remove-parent", @"remove-from-list",
-        @"parent-id", @"parent", @"to-list"]];
+        @"parent-id", @"to-list"]];
 
     // Validate all operations first
     for (NSUInteger i = 0; i < ops.count; i++) {

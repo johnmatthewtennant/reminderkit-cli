@@ -22,7 +22,7 @@ reminderkit lists
 reminderkit list (<name> | --name <name>)
 reminderkit get (<title> | --title <title>) [--list <name>]
 reminderkit add (<title> | --title <title>) [--list <name>] [--notes <value>]
-reminderkit update (<title> | --title <title> | --id <id>) [--list <name>] [--notes <value>] [--parent-title <title>] [--to-list <name>]
+reminderkit update (<title> | --title <title> | --id <id>) [--list <name>] [--notes <value>] [--parent <title>] [--parent-id <id>] [--to-list <name>]
 reminderkit complete (<title> | --title <title> | --id <id>) [--list <name>]
 reminderkit delete (<title> | --title <title> | --id <id>) [--list <name>]
 reminderkit subtasks (<title> | --title <title>) [--list <name>]

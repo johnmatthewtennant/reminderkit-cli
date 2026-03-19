@@ -744,8 +744,7 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
     NSString *parentID = opts[@"parent-id"];
     if (opts[@"parent"]) {
         if (parentID) errorExit(@"Cannot specify both --parent and --parent-id");
-        id parentByTitle = findReminder(store, opts[@"parent"], listName);
-        if (!parentByTitle) errorExit([NSString stringWithFormat:@"Parent not found with title: %@", opts[@"parent"]]);
+        id parentByTitle = requireUniqueReminder(store, opts[@"parent"], listName);
         parentID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(parentByTitle, sel_registerName("objectID")));
     }
 
@@ -753,6 +752,9 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
     BOOL removeParent = opts[@"remove-parent"] != nil;
     if (parentID && removeParent) {
         errorExit(@"Cannot specify both --parent-id/--parent and --remove-parent");
+    }
+    if (parentID && opts[@"to-list"]) {
+        errorExit(@"Cannot combine --parent-id/--parent with --to-list (parent must be in the same list)");
     }
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
@@ -946,7 +948,7 @@ static int cmdBatch(id store) {
     NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
         @"notes", @"priority", @"flagged", @"completed",
         @"due-date", @"start-date", @"url", @"remove-parent", @"remove-from-list",
-        @"parent-id", @"parent", @"to-list"]];
+        @"parent-id", @"to-list"]];
 
     // Validate all operations first
     for (NSUInteger i = 0; i < ops.count; i++) {
@@ -1453,8 +1455,10 @@ static int cmdTest(id store) {
                 if (r != 0) { fprintf(stderr, "  FAIL (update returned %d)\n", r); failed++; }
                 else {
                     id movedRem = findReminder(store, moveTitle, destListName);
-                    if (movedRem) { fprintf(stderr, "  PASS\n"); passed++; }
-                    else { fprintf(stderr, "  FAIL (reminder not found in dest list)\n"); failed++; }
+                    id staleRem = findReminder(store, moveTitle, testListName);
+                    if (movedRem && !staleRem) { fprintf(stderr, "  PASS\n"); passed++; }
+                    else if (!movedRem) { fprintf(stderr, "  FAIL (reminder not found in dest list)\n"); failed++; }
+                    else { fprintf(stderr, "  FAIL (reminder still in source list after move)\n"); failed++; }
                 }
                 // Clean up moved reminder
                 id cleanRem = findReminder(store, moveTitle, destListName);
