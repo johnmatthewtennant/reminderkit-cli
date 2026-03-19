@@ -740,11 +740,19 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
         errorExit(@"Cannot use --url and --clear-url together");
     }
 
-    // Validate conflicting parent flags
+    // Resolve --parent (title) to parent-id
     NSString *parentID = opts[@"parent-id"];
+    if (opts[@"parent"]) {
+        if (parentID) errorExit(@"Cannot specify both --parent and --parent-id");
+        id parentByTitle = findReminder(store, opts[@"parent"], listName);
+        if (!parentByTitle) errorExit([NSString stringWithFormat:@"Parent not found with title: %@", opts[@"parent"]]);
+        parentID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(parentByTitle, sel_registerName("objectID")));
+    }
+
+    // Validate conflicting parent flags
     BOOL removeParent = opts[@"remove-parent"] != nil;
     if (parentID && removeParent) {
-        errorExit(@"Cannot specify both --parent-id and --remove-parent");
+        errorExit(@"Cannot specify both --parent-id/--parent and --remove-parent");
     }
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
@@ -837,13 +845,9 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
         id destListCI = ((id (*)(id, SEL, id))objc_msgSend)(
             saveReq, sel_registerName("updateList:"), destList);
 
-        // Use initWithReminderChangeItem:insertIntoListChangeItem: to move
-        Class REMReminderCIClass = NSClassFromString(@"REMReminderChangeItem");
-        id moveCI = ((id (*)(id, SEL, id, id))objc_msgSend)(
-            [REMReminderCIClass alloc],
-            sel_registerName("initWithReminderChangeItem:insertIntoListChangeItem:"),
-            changeItem, destListCI);
-        if (!moveCI) errorExit(@"Failed to create move operation");
+        // Move: remove from current list and insert into destination list
+        ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));
+        ((void (*)(id, SEL, id))objc_msgSend)(destListCI, sel_registerName("addReminderChangeItem:"), changeItem);
     }
 
     NSError *error = nil;
@@ -942,7 +946,7 @@ static int cmdBatch(id store) {
     NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
         @"notes", @"priority", @"flagged", @"completed",
         @"due-date", @"start-date", @"url", @"remove-parent", @"remove-from-list",
-        @"parent-id", @"to-list"]];
+        @"parent-id", @"parent", @"to-list"]];
 
     // Validate all operations first
     for (NSUInteger i = 0; i < ops.count; i++) {
@@ -1432,27 +1436,91 @@ static int cmdTest(id store) {
         }
     }
 
+    // Test 29: cmdUpdate --to-list (cross-list move)
+    fprintf(stderr, "Test 29: cmdUpdate --to-list (cross-list move)...\n");
+    {
+        NSString *destListName = @"__remcli_test_dest_list__";
+        int cr = cmdCreateList(store, destListName);
+        if (cr != 0) { fprintf(stderr, "  FAIL (could not create dest list)\n"); failed++; }
+        else {
+            NSString *moveTitle = @"__remcli_test_move_item__";
+            int ar = cmdAdd(store, moveTitle, testListName, @{});
+            if (ar != 0) { fprintf(stderr, "  FAIL (could not add reminder)\n"); failed++; }
+            else {
+                id moveRem = findReminder(store, moveTitle, testListName);
+                NSString *moveID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(moveRem, sel_registerName("objectID")));
+                int r = cmdUpdate(store, testListName, @{@"id": moveID, @"to-list": destListName});
+                if (r != 0) { fprintf(stderr, "  FAIL (update returned %d)\n", r); failed++; }
+                else {
+                    id movedRem = findReminder(store, moveTitle, destListName);
+                    if (movedRem) { fprintf(stderr, "  PASS\n"); passed++; }
+                    else { fprintf(stderr, "  FAIL (reminder not found in dest list)\n"); failed++; }
+                }
+                // Clean up moved reminder
+                id cleanRem = findReminder(store, moveTitle, destListName);
+                if (!cleanRem) cleanRem = findReminder(store, moveTitle, testListName);
+                if (cleanRem) {
+                    NSString *cleanID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(cleanRem, sel_registerName("objectID")));
+                    cmdDelete(store, nil, cleanID);
+                }
+            }
+            cmdDeleteList(store, destListName);
+        }
+    }
+
+    // Test 30: cmdUpdate --parent (title-based reparenting)
+    // Creates a fresh reminder and reparents it under parentTitle using --parent (title)
+    fprintf(stderr, "Test 30: cmdUpdate --parent (title-based reparenting)...\n");
+    {
+        NSString *reparentTitle = @"__remcli_test_reparent_target__";
+        int ar = cmdAdd(store, reparentTitle, testListName, @{});
+        if (ar != 0) { fprintf(stderr, "  FAIL (could not add reminder)\n"); failed++; }
+        else {
+            id reparentRem = findReminder(store, reparentTitle, testListName);
+            NSString *reparentID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(reparentRem, sel_registerName("objectID")));
+            int r = cmdUpdate(store, testListName, @{@"id": reparentID, @"parent": parentTitle});
+            if (r != 0) { fprintf(stderr, "  FAIL (update returned %d)\n", r); failed++; }
+            else {
+                id updatedRem = findReminder(store, reparentTitle, testListName);
+                id parentRem30 = findReminder(store, parentTitle, testListName);
+                if (updatedRem && parentRem30) {
+                    id childPID = ((id (*)(id, SEL))objc_msgSend)(updatedRem, sel_registerName("parentReminderID"));
+                    id parentOID = ((id (*)(id, SEL))objc_msgSend)(parentRem30, sel_registerName("objectID"));
+                    if (childPID && parentOID && [objectIDToString(childPID) isEqualToString:objectIDToString(parentOID)]) {
+                        fprintf(stderr, "  PASS\n"); passed++;
+                    } else { fprintf(stderr, "  FAIL (parent-child not established)\n"); failed++; }
+                } else { fprintf(stderr, "  FAIL (could not find reminder after reparent)\n"); failed++; }
+            }
+            // Clean up
+            id cleanRem30 = findReminder(store, reparentTitle, testListName);
+            if (cleanRem30) {
+                NSString *cleanID30 = objectIDToString(((id (*)(id, SEL))objc_msgSend)(cleanRem30, sel_registerName("objectID")));
+                cmdDelete(store, testListName, cleanID30);
+            }
+        }
+    }
+
     // Cleanup
-    // Test 29: cmdDelete child
-    fprintf(stderr, "Test 29: cmdDelete child...\n");
+    // Test 31: cmdDelete child
+    fprintf(stderr, "Test 31: cmdDelete child...\n");
     {
-        id rem29 = findReminder(store, childTitle, testListName);
-        NSString *rem29ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem29, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem29ID);
+        id rem31 = findReminder(store, childTitle, testListName);
+        NSString *rem31ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem31, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem31ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 30: cmdDelete parent
-    fprintf(stderr, "Test 30: cmdDelete parent...\n");
+    // Test 32: cmdDelete parent
+    fprintf(stderr, "Test 32: cmdDelete parent...\n");
     {
-        id rem30 = findReminder(store, parentTitle, testListName);
-        NSString *rem30ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem30, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem30ID);
+        id rem32 = findReminder(store, parentTitle, testListName);
+        NSString *rem32ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem32, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem32ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 31: cmdDeleteList
-    fprintf(stderr, "Test 31: cmdDeleteList...\n");
+    // Test 33: cmdDeleteList
+    fprintf(stderr, "Test 33: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
@@ -1554,7 +1622,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit get --title <title> [--list <name>]  (alias for search)\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
-    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
+    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--parent <title>] [--to-list <name>]\n");
     fprintf(stderr, "  reminderkit complete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\n");

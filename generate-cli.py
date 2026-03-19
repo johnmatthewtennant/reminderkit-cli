@@ -787,11 +787,19 @@ def generate_update_command():
         '        errorExit(@"Cannot use --url and --clear-url together");',
         '    }',
         '',
-        '    // Validate conflicting parent flags',
+        '    // Resolve --parent (title) to parent-id',
         '    NSString *parentID = opts[@"parent-id"];',
+        '    if (opts[@"parent"]) {',
+        '        if (parentID) errorExit(@"Cannot specify both --parent and --parent-id");',
+        '        id parentByTitle = findReminder(store, opts[@"parent"], listName);',
+        '        if (!parentByTitle) errorExit([NSString stringWithFormat:@"Parent not found with title: %@", opts[@"parent"]]);',
+        '        parentID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(parentByTitle, sel_registerName("objectID")));',
+        '    }',
+        '',
+        '    // Validate conflicting parent flags',
         '    BOOL removeParent = opts[@"remove-parent"] != nil;',
         '    if (parentID && removeParent) {',
-        '        errorExit(@"Cannot specify both --parent-id and --remove-parent");',
+        '        errorExit(@"Cannot specify both --parent-id/--parent and --remove-parent");',
         '    }',
         '',
         '    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(',
@@ -901,13 +909,9 @@ def generate_update_command():
         '        id destListCI = ((id (*)(id, SEL, id))objc_msgSend)(',
         '            saveReq, sel_registerName("updateList:"), destList);',
         '',
-        '        // Use initWithReminderChangeItem:insertIntoListChangeItem: to move',
-        '        Class REMReminderCIClass = NSClassFromString(@"REMReminderChangeItem");',
-        '        id moveCI = ((id (*)(id, SEL, id, id))objc_msgSend)(',
-        '            [REMReminderCIClass alloc],',
-        '            sel_registerName("initWithReminderChangeItem:insertIntoListChangeItem:"),',
-        '            changeItem, destListCI);',
-        '        if (!moveCI) errorExit(@"Failed to create move operation");',
+        '        // Move: remove from current list and insert into destination list',
+        '        ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));',
+        '        ((void (*)(id, SEL, id))objc_msgSend)(destListCI, sel_registerName("addReminderChangeItem:"), changeItem);',
         '    }',
     ])
 
@@ -993,7 +997,7 @@ static int cmdBatch(id store) {
     NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
         @"notes", @"priority", @"flagged", @"completed",
         @"due-date", @"start-date", @"url", @"remove-parent", @"remove-from-list",
-        @"parent-id", @"to-list"]];
+        @"parent-id", @"parent", @"to-list"]];
 
     // Validate all operations first
     for (NSUInteger i = 0; i < ops.count; i++) {
@@ -1659,7 +1663,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit get --title <title> [--list <name>]  (alias for search)\\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\\n");
     fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\\n");
-    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\\n");
+    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--parent <title>] [--to-list <name>]\\n");
     fprintf(stderr, "  reminderkit complete --id <id> [--list <name>]\\n");
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\\n");
