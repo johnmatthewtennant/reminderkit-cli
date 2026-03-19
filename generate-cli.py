@@ -92,6 +92,10 @@ def generate_header():
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <mach-o/dyld.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <spawn.h>
+#include <fcntl.h>
 
 // --- Framework Loading ---
 
@@ -1132,6 +1136,147 @@ static int cmdBatch(id store) {
 '''
 
 
+def generate_test_helpers():
+    return '''
+// Helper: spawn the CLI binary with given args and assert it exits non-zero.
+// Returns 1 on PASS (command exited non-zero), 0 on FAIL.
+static int assertCliExitsNonZero(const char *testName, const char *argv[]) {
+    // Resolve our own binary path
+    char execPath[PATH_MAX];
+    uint32_t size = sizeof(execPath);
+    if (_NSGetExecutablePath(execPath, &size) != 0) {
+        fprintf(stderr, "  FAIL (%s: could not get executable path)\\n", testName);
+        return 0;
+    }
+    char realPath[PATH_MAX];
+    if (!realpath(execPath, realPath)) {
+        fprintf(stderr, "  FAIL (%s: could not resolve executable path)\\n", testName);
+        return 0;
+    }
+
+    // Build argv with binary path as argv[0]
+    // Count args
+    int argc = 0;
+    while (argv[argc]) argc++;
+    const char *spawnArgv[argc + 2];
+    spawnArgv[0] = realPath;
+    for (int i = 0; i <= argc; i++) spawnArgv[i + 1] = argv[i]; // includes trailing NULL
+
+    // Redirect stdout and stderr to /dev/null
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+
+    pid_t pid;
+    extern char **environ;
+    int spawnErr = posix_spawn(&pid, realPath, &actions, NULL, (char *const *)spawnArgv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+
+    if (spawnErr != 0) {
+        fprintf(stderr, "  FAIL (%s: posix_spawn failed: %s)\\n", testName, strerror(spawnErr));
+        return 0;
+    }
+
+    // Wait with timeout (10 seconds)
+    int status;
+    for (int i = 0; i < 100; i++) {
+        pid_t result = waitpid(pid, &status, WNOHANG);
+        if (result == pid) {
+            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                return 1; // PASS: exited non-zero
+            } else {
+                fprintf(stderr, "  FAIL (%s: expected non-zero exit, got %d)\\n", testName,
+                    WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+                return 0;
+            }
+        } else if (result < 0) {
+            fprintf(stderr, "  FAIL (%s: waitpid error: %s)\\n", testName, strerror(errno));
+            return 0;
+        }
+        usleep(100000); // 100ms
+    }
+    // Timeout — kill and fail
+    kill(pid, SIGKILL);
+    waitpid(pid, &status, 0);
+    fprintf(stderr, "  FAIL (%s: timed out after 10s)\\n", testName);
+    return 0;
+}
+
+// --- Test Helpers ---
+
+// Capture stdout from a block into an NSData buffer.
+// Uses a temp file to avoid pipe buffer deadlocks on large output.
+static NSData *captureStdout(void (^block)(void)) {
+    fflush(stdout);
+    char tmpl[] = "/tmp/remcli-test-XXXXXX";
+    int tmpfd = mkstemp(tmpl);
+    if (tmpfd < 0) return nil;
+    unlink(tmpl);
+
+    int savedStdout = dup(STDOUT_FILENO);
+    if (savedStdout < 0) { close(tmpfd); return nil; }
+    if (dup2(tmpfd, STDOUT_FILENO) < 0) { close(tmpfd); close(savedStdout); return nil; }
+    close(tmpfd);
+
+    block();
+    fflush(stdout);
+
+    tmpfd = dup(STDOUT_FILENO);
+    if (tmpfd < 0) { dup2(savedStdout, STDOUT_FILENO); close(savedStdout); return nil; }
+    if (dup2(savedStdout, STDOUT_FILENO) < 0) { close(tmpfd); close(savedStdout); return nil; }
+    close(savedStdout);
+
+    lseek(tmpfd, 0, SEEK_SET);
+    NSMutableData *buf = [NSMutableData data];
+    char tmp[4096];
+    ssize_t n;
+    while ((n = read(tmpfd, tmp, sizeof(tmp))) > 0) {
+        [buf appendBytes:tmp length:n];
+    }
+    close(tmpfd);
+    return buf;
+}
+
+// Parse captured stdout as JSON. Returns nil on failure.
+// Logs parse errors to stderr for debuggability.
+static id parseJSONFromData(NSData *data) {
+    if (!data || data.length == 0) return nil;
+    NSError *err = nil;
+    id result = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
+    if (err) fprintf(stderr, "  JSON parse error: %s\\n", [[err localizedDescription] UTF8String]);
+    return result;
+}
+
+// Check that a JSON array contains at least one dict with the given key.
+static BOOL jsonArrayHasKey(NSArray *arr, NSString *key) {
+    for (NSDictionary *item in arr) {
+        if ([item isKindOfClass:[NSDictionary class]] && item[key] != nil) return YES;
+    }
+    return NO;
+}
+
+// Check that ALL dicts in a JSON array have the given key.
+static BOOL jsonArrayAllHaveKey(NSArray *arr, NSString *key) {
+    if (arr.count == 0) return NO;
+    for (id item in arr) {
+        if (![item isKindOfClass:[NSDictionary class]] || ((NSDictionary *)item)[key] == nil) return NO;
+    }
+    return YES;
+}
+
+// Find the first dict in a JSON array with a matching value for a key.
+static NSDictionary *jsonArrayFind(NSArray *arr, NSString *key, NSString *value) {
+    for (id item in arr) {
+        if ([item isKindOfClass:[NSDictionary class]]) {
+            id v = ((NSDictionary *)item)[key];
+            if ([v isKindOfClass:[NSString class]] && [v isEqualToString:value]) return item;
+        }
+    }
+    return nil;
+}'''
+
+
 def generate_test_command():
     return '''
 static int cmdTest(id store) {
@@ -1160,17 +1305,47 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 1: cmdCreateList...\\n");
     { int r = cmdCreateList(store, testListName); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; return 1; } }
 
-    // Test 2: cmdLists
-    fprintf(stderr, "Test 2: cmdLists...\\n");
-    { int r = cmdLists(store); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
+    // Test 2: cmdLists (verify JSON output shape)
+    fprintf(stderr, "Test 2: cmdLists JSON shape...\\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdLists(store); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not a JSON array)\\n"); failed++;
+            } else if (!jsonArrayAllHaveKey(json, @"name") || !jsonArrayAllHaveKey(json, @"id")) {
+                fprintf(stderr, "  FAIL (not all items have 'name' and 'id')\\n"); failed++;
+            } else if (!jsonArrayFind(json, @"name", testListName)) {
+                fprintf(stderr, "  FAIL (test list not found in output)\\n"); failed++;
+            } else { fprintf(stderr, "  PASS\\n"); passed++; }
+        }
+    }
 
     // Test 3: cmdAdd
     fprintf(stderr, "Test 3: cmdAdd...\\n");
     { int r = cmdAdd(store, parentTitle, testListName, @{@"notes": @"Test notes", @"priority": @"5"}); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
 
-    // Test 4: cmdGet
-    fprintf(stderr, "Test 4: cmdGet...\\n");
-    { int r = cmdGet(store, parentTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
+    // Test 4: cmdGet (verify JSON output shape)
+    fprintf(stderr, "Test 4: cmdGet JSON shape...\\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSDictionary class]]) {
+                fprintf(stderr, "  FAIL (not a JSON object)\\n"); failed++;
+            } else {
+                NSDictionary *dict = json;
+                BOOL ok = dict[@"title"] && dict[@"id"] && dict[@"completed"] != nil
+                    && dict[@"priority"] != nil && dict[@"createdAt"] && dict[@"modifiedAt"];
+                if (ok) { fprintf(stderr, "  PASS\\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (missing expected fields)\\n"); failed++; }
+            }
+        }
+    }
 
     // Test 5: cmdUpdate (change notes, priority, flagged)
     fprintf(stderr, "Test 5: cmdUpdate...\\n");
@@ -1252,9 +1427,24 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; }
     }
 
-    // Test 13: cmdList
-    fprintf(stderr, "Test 13: cmdList...\\n");
-    { int r = cmdList(store, testListName, NO); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
+    // Test 13: cmdList (verify JSON output shape)
+    fprintf(stderr, "Test 13: cmdList JSON shape...\\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not a JSON array)\\n"); failed++;
+            } else if (!jsonArrayAllHaveKey(json, @"title") || !jsonArrayAllHaveKey(json, @"id")
+                    || !jsonArrayAllHaveKey(json, @"completed") || !jsonArrayAllHaveKey(json, @"priority")) {
+                fprintf(stderr, "  FAIL (not all items have expected fields)\\n"); failed++;
+            } else if (!jsonArrayFind(json, @"title", parentTitle)) {
+                fprintf(stderr, "  FAIL (parent reminder not found in output)\\n"); failed++;
+            } else { fprintf(stderr, "  PASS\\n"); passed++; }
+        }
+    }
 
     // Test 14: JSON shape
     fprintf(stderr, "Test 14: JSON shape...\\n");
@@ -1306,9 +1496,28 @@ static int cmdTest(id store) {
         } else { fprintf(stderr, "  FAIL\\n"); failed++; }
     }
 
-    // Test 17: cmdSubtasks
-    fprintf(stderr, "Test 17: cmdSubtasks...\\n");
-    { int r = cmdSubtasks(store, parentTitle, testListName); if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; } }
+    // Test 17: cmdSubtasks (verify JSON output shape)
+    fprintf(stderr, "Test 17: cmdSubtasks JSON shape...\\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdSubtasks(store, parentTitle, testListName); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not a JSON array)\\n"); failed++;
+            } else {
+                NSArray *arr = json;
+                if (arr.count == 0) {
+                    fprintf(stderr, "  FAIL (empty array, expected subtasks)\\n"); failed++;
+                } else if (!jsonArrayAllHaveKey(arr, @"title") || !jsonArrayAllHaveKey(arr, @"id")) {
+                    fprintf(stderr, "  FAIL (subtask items missing expected fields)\\n"); failed++;
+                } else if (!jsonArrayFind(arr, @"title", childTitle)) {
+                    fprintf(stderr, "  FAIL (child reminder not found in subtasks)\\n"); failed++;
+                } else { fprintf(stderr, "  PASS\\n"); passed++; }
+            }
+        }
+    }
 
     // Test 18: Error path (not found)
     fprintf(stderr, "Test 18: Error path (not found)...\\n");
@@ -1484,27 +1693,114 @@ static int cmdTest(id store) {
         }
     }
 
+    // Error path tests (not found, invalid args)
+    // Uses posix_spawn to invoke the CLI binary directly, avoiding fork-safety
+    // issues with Objective-C runtime. Each test spawns a fresh process with
+    // a 10-second timeout via assertCliExitsNonZero().
+
+    // Test 29: findReminderByID returns nil for nonexistent ID
+    fprintf(stderr, "Test 29: findReminderByID not found...\\n");
+    {
+        id notFound = findReminderByID(store, @"__nonexistent_id_999__");
+        if (!notFound) { fprintf(stderr, "  PASS\\n"); passed++; }
+        else { fprintf(stderr, "  FAIL (should be nil)\\n"); failed++; }
+    }
+
+    // Test 30: get exits non-zero for nonexistent title
+    fprintf(stderr, "Test 30: get error path (not found)...\\n");
+    {
+        const char *args[] = {"get", "--title", "__nonexistent_reminder_999__", "--list", [testListName UTF8String], NULL};
+        if (assertCliExitsNonZero("get not found", args)) { fprintf(stderr, "  PASS\\n"); passed++; }
+        else { failed++; }
+    }
+
+    // Test 31: update exits non-zero for nonexistent ID
+    fprintf(stderr, "Test 31: update error path (not found)...\\n");
+    {
+        const char *args[] = {"update", "--id", "__nonexistent_id_999__", NULL};
+        if (assertCliExitsNonZero("update not found", args)) { fprintf(stderr, "  PASS\\n"); passed++; }
+        else { failed++; }
+    }
+
+    // Test 32: complete exits non-zero for nonexistent ID
+    fprintf(stderr, "Test 32: complete error path (not found)...\\n");
+    {
+        const char *args[] = {"complete", "--id", "__nonexistent_id_999__", NULL};
+        if (assertCliExitsNonZero("complete not found", args)) { fprintf(stderr, "  PASS\\n"); passed++; }
+        else { failed++; }
+    }
+
+    // Test 33: delete exits non-zero for nonexistent ID
+    fprintf(stderr, "Test 33: delete error path (not found)...\\n");
+    {
+        const char *args[] = {"delete", "--id", "__nonexistent_id_999__", NULL};
+        if (assertCliExitsNonZero("delete not found", args)) { fprintf(stderr, "  PASS\\n"); passed++; }
+        else { failed++; }
+    }
+
+    // Test 34: update exits non-zero for conflicting --parent-id and --remove-parent
+    fprintf(stderr, "Test 34: update error path (conflicting parent flags)...\\n");
+    {
+        id rem34 = findReminder(store, parentTitle, testListName);
+        if (!rem34) { fprintf(stderr, "  FAIL (test reminder not found)\\n"); failed++; }
+        else {
+            NSString *rem34ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem34, sel_registerName("objectID")));
+            const char *args[] = {"update", "--id", [rem34ID UTF8String], "--parent-id", "some-id", "--remove-parent", NULL};
+            if (assertCliExitsNonZero("update conflicting parent flags", args)) { fprintf(stderr, "  PASS\\n"); passed++; }
+            else { failed++; }
+        }
+    }
+
+    // Test 35: update exits non-zero for conflicting --url and --clear-url
+    fprintf(stderr, "Test 35: update error path (conflicting url flags)...\\n");
+    {
+        id rem35 = findReminder(store, parentTitle, testListName);
+        if (!rem35) { fprintf(stderr, "  FAIL (test reminder not found)\\n"); failed++; }
+        else {
+            NSString *rem35ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem35, sel_registerName("objectID")));
+            const char *args[] = {"update", "--id", [rem35ID UTF8String], "--url", "http://example.com", "--clear-url", NULL};
+            if (assertCliExitsNonZero("update conflicting url flags", args)) { fprintf(stderr, "  PASS\\n"); passed++; }
+            else { failed++; }
+        }
+    }
+
+    // Test 36: add-tag exits non-zero without required --tag
+    fprintf(stderr, "Test 36: add-tag error path (missing --tag)...\\n");
+    {
+        const char *args[] = {"add-tag", "--id", "some-id", NULL};
+        if (assertCliExitsNonZero("add-tag missing --tag", args)) { fprintf(stderr, "  PASS\\n"); passed++; }
+        else { failed++; }
+    }
+
+    // Test 37: add exits non-zero without required --title
+    fprintf(stderr, "Test 37: add error path (missing --title)...\\n");
+    {
+        const char *args[] = {"add", "--list", "SomeList", NULL};
+        if (assertCliExitsNonZero("add missing --title", args)) { fprintf(stderr, "  PASS\\n"); passed++; }
+        else { failed++; }
+    }
+
     // Cleanup
-    // Test 29: cmdDelete child
-    fprintf(stderr, "Test 29: cmdDelete child...\\n");
+    // Test 38: cmdDelete child
+    fprintf(stderr, "Test 38: cmdDelete child...\\n");
     {
-        id rem29 = findReminder(store, childTitle, testListName);
-        NSString *rem29ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem29, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem29ID);
+        id rem38 = findReminder(store, childTitle, testListName);
+        NSString *rem38ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem38, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem38ID);
         if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; }
     }
 
-    // Test 30: cmdDelete parent
-    fprintf(stderr, "Test 30: cmdDelete parent...\\n");
+    // Test 39: cmdDelete parent
+    fprintf(stderr, "Test 39: cmdDelete parent...\\n");
     {
-        id rem30 = findReminder(store, parentTitle, testListName);
-        NSString *rem30ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem30, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem30ID);
+        id rem39 = findReminder(store, parentTitle, testListName);
+        NSString *rem39ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem39, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem39ID);
         if (r==0) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL\\n"); failed++; }
     }
 
-    // Test 31: cmdDeleteList
-    fprintf(stderr, "Test 31: cmdDeleteList...\\n");
+    // Test 40: cmdDeleteList
+    fprintf(stderr, "Test 40: cmdDeleteList...\\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\\n"); failed++; }
@@ -1858,6 +2154,7 @@ def main():
     output.append(generate_batch_command())
     output.append('')
     output.append('// --- Tests ---')
+    output.append(generate_test_helpers())
     output.append(generate_test_command())
     output.append('')
     output.append(generate_install_skill_command())
