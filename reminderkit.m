@@ -145,11 +145,11 @@ int main(int argc, const char *argv[]) {
 
         } else if ([command isEqualToString:@"complete"]) {
             if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
-            return cmdComplete(store, listName, opts[@"id"]);
+            return cmdComplete(store, opts[@"id"]);
 
         } else if ([command isEqualToString:@"delete"]) {
             if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
-            return cmdDelete(store, listName, opts[@"id"]);
+            return cmdDelete(store, opts[@"id"]);
 
         } else if ([command isEqualToString:@"batch"]) {
             return cmdBatch(store);

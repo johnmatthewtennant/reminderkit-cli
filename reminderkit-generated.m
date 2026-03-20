@@ -36,8 +36,7 @@ static void errorExit(NSString *msg) {
 
 static NSString *objectIDToString(id objID) {
     if (!objID) return nil;
-    return [[objID description] stringByReplacingOccurrencesOfString:@"<" withString:@""]
-        ? [objID description] : @"(unknown)";
+    return [objID description];
 }
 
 static NSString *dateToISO(NSDate *date) {
@@ -805,7 +804,7 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
     }
 
     NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
@@ -841,7 +840,7 @@ static int cmdCreateList(id store, NSString *name) {
     if (!newList) errorExit(@"Failed to create list");
 
     NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
@@ -863,7 +862,7 @@ static int cmdRenameList(id store, NSString *oldName, NSString *newName) {
     ((void (*)(id, SEL, id))objc_msgSend)(storage, sel_registerName("setName:"), newName);
 
     NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
@@ -884,7 +883,7 @@ static int cmdDeleteList(id store, NSString *name) {
     ((void (*)(id, SEL))objc_msgSend)(listCI, sel_registerName("removeFromParent"));
 
     NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
@@ -910,7 +909,7 @@ static int cmdAddTag(id store, NSString *remID, NSString *tagName) {
         hashtagCtx, sel_registerName("addHashtagWithType:name:"), (NSUInteger)0, tagName);
 
     NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
@@ -945,7 +944,7 @@ static int cmdRemoveTag(id store, NSString *remID, NSString *tagName) {
     ((void (*)(id, SEL, id))objc_msgSend)(hashtagCtx, sel_registerName("removeHashtag:"), tagToRemove);
 
     NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
@@ -990,11 +989,6 @@ static int cmdCreateSection(id store, NSString *listName, NSString *sectionName)
     id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
         saveReq, sel_registerName("updateList:"), list);
 
-    id sectionsCtx = ((id (*)(id, SEL))objc_msgSend)(listCI, sel_registerName("sectionsContextChangeItem"));
-    if (!sectionsCtx) errorExit(@"Failed to get sections context");
-
-    id listObjID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
-
     // Create a new section change item
     id newSection = ((id (*)(id, SEL, id, id, id))objc_msgSend)(
         [REMListSectionCIClass alloc],
@@ -1004,7 +998,7 @@ static int cmdCreateSection(id store, NSString *listName, NSString *sectionName)
     if (!newSection) errorExit(@"Failed to create section");
 
     NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
@@ -1132,7 +1126,7 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
     }
 
     NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
@@ -1144,7 +1138,7 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
 }
 
 
-static int cmdComplete(id store, NSString *listName, NSString *remID) {
+static int cmdComplete(id store, NSString *remID) {
     id rem = findReminderByID(store, remID);
     if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", remID]);
 
@@ -1157,7 +1151,7 @@ static int cmdComplete(id store, NSString *listName, NSString *remID) {
     ((void (*)(id, SEL, BOOL))objc_msgSend)(changeItem, sel_registerName("setCompleted:"), YES);
 
     NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
@@ -1167,7 +1161,7 @@ static int cmdComplete(id store, NSString *listName, NSString *remID) {
 
 
 
-static int cmdDelete(id store, NSString *listName, NSString *remID) {
+static int cmdDelete(id store, NSString *remID) {
     id rem = findReminderByID(store, remID);
     if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", remID]);
 
@@ -1180,7 +1174,7 @@ static int cmdDelete(id store, NSString *listName, NSString *remID) {
     ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));
 
     NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
