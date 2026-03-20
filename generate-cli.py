@@ -1619,7 +1619,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 13: cmdList JSON shape...\\n");
     {
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO, nil, nil); });
+        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO, nil, nil, NO); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -2233,7 +2233,7 @@ int main(int argc, const char *argv[]) {
 
         } else if ([command isEqualToString:@"list"]) {
             if (!kwName) { fprintf(stderr, "Error: --name required\\n"); usage(); return 1; }
-            return cmdList(store, kwName, includeCompleted, opts[@"tag"], opts[@"exclude-tag"]);
+            return cmdList(store, kwName, includeCompleted, opts[@"tag"], opts[@"exclude-tag"], hasURL);
 
         } else if ([command isEqualToString:@"search"] || [command isEqualToString:@"get"]) {
             if (opts[@"id"] && [opts[@"id"] length] > 0) {

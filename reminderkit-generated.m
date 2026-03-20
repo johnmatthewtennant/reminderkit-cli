@@ -462,7 +462,7 @@ static NSSet *getTagNames(id rem) {
     }
 }
 
-static int cmdList(id store, NSString *listName, BOOL includeCompleted, NSString *tagFilter, NSString *excludeTagFilter) {
+static int cmdList(id store, NSString *listName, BOOL includeCompleted, NSString *tagFilter, NSString *excludeTagFilter, BOOL hasURL) {
     id list = findList(store, listName);
     if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
     NSArray *rems = fetchReminders(store, list, includeCompleted);
@@ -472,6 +472,14 @@ static int cmdList(id store, NSString *listName, BOOL includeCompleted, NSString
 
     NSMutableArray *result = [NSMutableArray array];
     for (id rem in rems) {
+        if (hasURL) {
+            @try {
+                id attCtx = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("attachmentContext"));
+                if (!attCtx) continue;
+                NSArray *urlAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("urlAttachments"));
+                if (!urlAtts || urlAtts.count == 0) continue;
+            } @catch (NSException *e) { continue; }
+        }
         if (includeTags || excludeTags) {
             NSSet *remTags = getTagNames(rem);
             if (includeTags && ![includeTags intersectsSet:remTags]) continue;

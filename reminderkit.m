@@ -15,7 +15,7 @@
 static void usage(void) {
     fprintf(stderr, "Usage:\n");
     fprintf(stderr, "  reminderkit lists\n");
-    fprintf(stderr, "  reminderkit list --name <name> [--include-completed] [--tag <tags>] [--exclude-tag <tags>]\n");
+    fprintf(stderr, "  reminderkit list --name <name> [--include-completed] [--has-url] [--tag <tags>] [--exclude-tag <tags>]\n");
     fprintf(stderr, "  reminderkit search --title <title> [--url <url>] [--list <name>]\n");
     fprintf(stderr, "  reminderkit search --url <url> [--list <name>]\n");
     fprintf(stderr, "  reminderkit search --id <id>\n");
@@ -62,6 +62,7 @@ int main(int argc, const char *argv[]) {
         NSMutableArray *positional = [NSMutableArray array];
         NSMutableDictionary *opts = [NSMutableDictionary dictionary];
         BOOL includeCompleted = NO;
+        BOOL hasURL = NO;
 
         for (int i = 2; i < argc; i++) {
             NSString *arg = [NSString stringWithUTF8String:argv[i]];
@@ -72,10 +73,12 @@ int main(int argc, const char *argv[]) {
                     [flag isEqualToString:@"remove-from-list"] ||
                     [flag isEqualToString:@"help"] ||
                     [flag isEqualToString:@"clear-url"] ||
+                    [flag isEqualToString:@"has-url"] ||
                     [flag isEqualToString:@"claude"] ||
                     [flag isEqualToString:@"agents"] ||
                     [flag isEqualToString:@"force"]) {
                     if ([flag isEqualToString:@"include-completed"]) includeCompleted = YES;
+                    if ([flag isEqualToString:@"has-url"]) hasURL = YES;
                     opts[flag] = @"true";
                 } else if (i + 1 < argc) {
                     opts[flag] = [NSString stringWithUTF8String:argv[++i]];
@@ -114,7 +117,7 @@ int main(int argc, const char *argv[]) {
 
         } else if ([command isEqualToString:@"list"]) {
             if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
-            return cmdList(store, kwName, includeCompleted, opts[@"tag"], opts[@"exclude-tag"]);
+            return cmdList(store, kwName, includeCompleted, opts[@"tag"], opts[@"exclude-tag"], hasURL);
 
         } else if ([command isEqualToString:@"search"] || [command isEqualToString:@"get"]) {
             if (opts[@"id"] && [opts[@"id"] length] > 0) {
