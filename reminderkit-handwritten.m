@@ -58,6 +58,25 @@ static int cmdBatch(id store) {
                 errorExit([NSString stringWithFormat:@"Operation %lu (%@) requires tag", (unsigned long)i, opType]);
             }
         }
+        // Validate conflicting flags
+        if ([opType isEqualToString:@"update"]) {
+            if (op[@"url"] && op[@"clear-url"]) {
+                errorExit([NSString stringWithFormat:@"Operation %lu: cannot use url and clear-url together", (unsigned long)i]);
+            }
+            if (op[@"parent-id"] && op[@"remove-parent"]) {
+                errorExit([NSString stringWithFormat:@"Operation %lu: cannot use parent-id and remove-parent together", (unsigned long)i]);
+            }
+        }
+        // Validate field types
+        if (op[@"id"] && ![op[@"id"] isKindOfClass:[NSString class]]) {
+            errorExit([NSString stringWithFormat:@"Operation %lu: id must be a string", (unsigned long)i]);
+        }
+        if (op[@"tag"] && ![op[@"tag"] isKindOfClass:[NSString class]]) {
+            errorExit([NSString stringWithFormat:@"Operation %lu: tag must be a string", (unsigned long)i]);
+        }
+        if (op[@"title"] && ![op[@"title"] isKindOfClass:[NSString class]]) {
+            errorExit([NSString stringWithFormat:@"Operation %lu: title must be a string", (unsigned long)i]);
+        }
     }
 
     // Create single save request
@@ -112,6 +131,10 @@ static int cmdBatch(id store) {
             if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
             if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
             if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(newRem, sel_registerName("attachmentContext")); ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), u); } }
+            if (op[@"completed"]) {
+                BOOL val = [op[@"completed"] isEqualToString:@"true"];
+                ((void (*)(id, SEL, BOOL))objc_msgSend)(newRem, sel_registerName("setCompleted:"), val);
+            }
 
             // Reparent if parent-id specified
             if (batchParentID) {
