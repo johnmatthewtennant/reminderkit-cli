@@ -30,9 +30,14 @@ Command-line interface for Apple Reminders. Built on the private ReminderKit fra
 - `reminderkit list --name "List" --has-url` — list only reminders that have a URL set
 - `reminderkit list --name "List" --tag "tag1,tag2"` — list only reminders with any of the specified tags
 - `reminderkit list --name "List" --exclude-tag "tag1,tag2"` — list reminders excluding those with any of the specified tags
-- `reminderkit get --title "Title" --list "List"` — find a reminder by title
-- `reminderkit get --url <url> [--list "List"]` — find a reminder by URL field (normalizes trailing slashes)
-- `reminderkit get --id <id>` — fetch a reminder by ID (faster, no list scan needed)
+- `reminderkit search --title "Title" --list "List"` — find a reminder by title
+- `reminderkit search --url <url> [--list "List"]` — find a reminder by URL field (normalizes trailing slashes)
+- `reminderkit search --id <id>` — fetch a reminder by ID (faster, no list scan needed)
+- `reminderkit search --tag "tag1,tag2"` — search across all lists for reminders with any of the specified tags
+- `reminderkit search --has-url` — search across all lists for reminders that have a URL set
+- `reminderkit search --exclude-tag "tag1,tag2"` — search excluding reminders with any of the specified tags
+- `reminderkit search --tag "status-needs-human-review" --has-url` — combine filters (e.g., PRs needing review)
+- `reminderkit search --title "bug" --tag "urgent"` — combine title search with tag filter
 - `reminderkit update --id <id> --title "New Title"` — rename a reminder
 
 ## Linking reminders to Apple Notes
