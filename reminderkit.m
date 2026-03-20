@@ -25,6 +25,9 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\n");
     fprintf(stderr, "  reminderkit remove-tag --id <id> --tag <tag-name>\n");
+    fprintf(stderr, "  reminderkit assign --id <id> --assignee-id <sharee-id>\n");
+    fprintf(stderr, "  reminderkit unassign --id <id> [--assignee-id <sharee-id>]  (omit --assignee-id to remove all)\n");
+    fprintf(stderr, "  reminderkit list-sharees --name <list-name>\n");
     fprintf(stderr, "  reminderkit link-note --id <id> --note-id <note-id>\n");
     fprintf(stderr, "  reminderkit list-sections --name <list-name>\n");
     fprintf(stderr, "  reminderkit create-section --name <list-name> --section <section-name>\n");
@@ -32,6 +35,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit rename-list --old-name <old-name> --new-name <new-name>\n");
     fprintf(stderr, "  reminderkit delete-list --name <name>\n");
     fprintf(stderr, "  reminderkit batch  (reads JSON array from stdin)\n");
+    fprintf(stderr, "    ops: add, update, complete, delete, add-tag, remove-tag\n");
     fprintf(stderr, "\n  Skill management:\n");
     fprintf(stderr, "  reminderkit install-skill [--claude] [--agents] [--force]\n");
     fprintf(stderr, "\n  Testing:\n");
@@ -145,6 +149,19 @@ int main(int argc, const char *argv[]) {
             if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
             if (!kwTag) { fprintf(stderr, "Error: --tag required\n"); usage(); return 1; }
             return cmdRemoveTag(store, opts[@"id"], kwTag);
+
+        } else if ([command isEqualToString:@"assign"]) {
+            if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
+            if (!opts[@"assignee-id"] || [opts[@"assignee-id"] length] == 0) { fprintf(stderr, "Error: --assignee-id required\n"); usage(); return 1; }
+            return cmdAssign(store, opts[@"id"], opts[@"assignee-id"]);
+
+        } else if ([command isEqualToString:@"unassign"]) {
+            if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
+            return cmdUnassign(store, opts[@"id"], opts[@"assignee-id"]);
+
+        } else if ([command isEqualToString:@"list-sharees"]) {
+            if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
+            return cmdListSharees(store, kwName);
 
         } else if ([command isEqualToString:@"link-note"]) {
             if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
