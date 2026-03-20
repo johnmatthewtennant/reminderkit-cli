@@ -130,14 +130,6 @@ static NSData *captureStdoutWithStdin(NSString *stdinStr, void (^block)(void)) {
     return result;
 }
 
-// Check that a JSON array contains at least one dict with the given key.
-static BOOL jsonArrayHasKey(NSArray *arr, NSString *key) {
-    for (NSDictionary *item in arr) {
-        if ([item isKindOfClass:[NSDictionary class]] && item[key] != nil) return YES;
-    }
-    return NO;
-}
-
 // Check that ALL dicts in a JSON array have the given key.
 static BOOL jsonArrayAllHaveKey(NSArray *arr, NSString *key) {
     if (arr.count == 0) return NO;
@@ -302,7 +294,7 @@ static int cmdTest(id store) {
     {
         id rem12 = findReminder(store, childTitle, testListName);
         NSString *rem12ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem12, sel_registerName("objectID")));
-        int r = cmdComplete(store, testListName, rem12ID);
+        int r = cmdComplete(store, rem12ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
@@ -448,7 +440,7 @@ static int cmdTest(id store) {
                     fprintf(stderr, "  PASS\n"); passed++;
                 } else { fprintf(stderr, "  FAIL (not parented correctly)\n"); failed++; }
                 NSString *child22ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(child22, sel_registerName("objectID")));
-                cmdDelete(store, testListName, child22ID);
+                cmdDelete(store, child22ID);
             } else { fprintf(stderr, "  FAIL (child not found in test list)\n"); failed++; }
         } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
     }
@@ -463,7 +455,7 @@ static int cmdTest(id store) {
             if (found) {
                 fprintf(stderr, "  PASS\n"); passed++;
                 NSString *foundID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(found, sel_registerName("objectID")));
-                cmdDelete(store, testListName, foundID);
+                cmdDelete(store, foundID);
             } else { fprintf(stderr, "  FAIL (not found after create)\n"); failed++; }
         } else { fprintf(stderr, "  FAIL (cmdAdd returned %d)\n", r); failed++; }
     }
@@ -482,7 +474,7 @@ static int cmdTest(id store) {
             id rem24c = findReminder(store, curlyTitle, testListName);
             if (rem24c) {
                 NSString *rem24cID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem24c, sel_registerName("objectID")));
-                cmdDelete(store, testListName, rem24cID);
+                cmdDelete(store, rem24cID);
             }
         } else { fprintf(stderr, "  FAIL (could not create reminder)\n"); failed++; }
     }
@@ -522,9 +514,9 @@ static int cmdTest(id store) {
             }
         } else { fprintf(stderr, "  FAIL (could not create reminders)\n"); failed++; }
         id rem26a = findReminder(store, straightTitle26, testListName);
-        if (rem26a) { NSString *id26a = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem26a, sel_registerName("objectID"))); cmdDelete(store, testListName, id26a); }
+        if (rem26a) { NSString *id26a = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem26a, sel_registerName("objectID"))); cmdDelete(store, id26a); }
         id rem26b = findReminder(store, curlyTitle26, testListName);
-        if (rem26b) { NSString *id26b = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem26b, sel_registerName("objectID"))); cmdDelete(store, testListName, id26b); }
+        if (rem26b) { NSString *id26b = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem26b, sel_registerName("objectID"))); cmdDelete(store, id26b); }
     }
 
     // Test 27: exact match takes priority -- list collision
@@ -568,7 +560,7 @@ static int cmdTest(id store) {
         id dup = findReminder(store, searchTitle2, testListName);
         if (dup) {
             NSString *dupID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(dup, sel_registerName("objectID")));
-            cmdDelete(store, testListName, dupID);
+            cmdDelete(store, dupID);
         }
     }
 
@@ -1005,7 +997,7 @@ static int cmdTest(id store) {
     {
         id rem38 = findReminder(store, childTitle, testListName);
         NSString *rem38ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem38, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem38ID);
+        int r = cmdDelete(store, rem38ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
@@ -1014,7 +1006,7 @@ static int cmdTest(id store) {
     {
         id rem45 = findReminder(store, parentTitle, testListName);
         NSString *rem45ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem45, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem45ID);
+        int r = cmdDelete(store, rem45ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
