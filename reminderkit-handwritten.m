@@ -281,6 +281,20 @@ static id findShareeByID(id list, NSString *shareeID) {
     return nil;
 }
 
+static NSString *extractUUIDFromObjectID(NSString *objIDStr) {
+    // objectID format: "emoji~<x-apple-reminderkit://REMCDSharee/UUID>"
+    // Extract the UUID after the last "/"
+    if (!objIDStr) return nil;
+    NSRange lastSlash = [objIDStr rangeOfString:@"/" options:NSBackwardsSearch];
+    if (lastSlash.location == NSNotFound) return objIDStr;
+    NSString *afterSlash = [objIDStr substringFromIndex:lastSlash.location + 1];
+    // Strip trailing ">" if present
+    if ([afterSlash hasSuffix:@">"]) {
+        afterSlash = [afterSlash substringToIndex:afterSlash.length - 1];
+    }
+    return afterSlash;
+}
+
 static id findShareeForCurrentUser(id list) {
     NSString *currentUserID = ((id (*)(id, SEL))objc_msgSend)(
         list, sel_registerName("currentUserShareParticipantID"));
@@ -292,9 +306,10 @@ static id findShareeForCurrentUser(id list) {
     NSArray *sharees = ((id (*)(id, SEL))objc_msgSend)(shareeCtx, sel_registerName("sharees"));
     for (id sharee in sharees) {
         id objID = ((id (*)(id, SEL))objc_msgSend)(sharee, sel_registerName("objectID"));
-        // currentUserShareParticipantID is the UUID portion of the sharee objectID
         NSString *objIDStr = objectIDToString(objID);
-        if (objIDStr && [objIDStr containsString:currentUserID]) {
+        // Extract UUID from objectID and compare exactly
+        NSString *shareeUUID = extractUUIDFromObjectID(objIDStr);
+        if (shareeUUID && [shareeUUID isEqualToString:currentUserID]) {
             return sharee;
         }
     }
