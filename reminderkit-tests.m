@@ -310,7 +310,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 13: cmdList JSON shape...\n");
     {
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO); });
+        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO, nil, nil, NO); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -784,9 +784,81 @@ static int cmdTest(id store) {
         }
     }
 
+    // Test 43: cmdList --tag filter
+    fprintf(stderr, "Test 43: cmdList --tag filter...\n");
+    {
+        // Add a tag to the parent reminder for filtering
+        id rem43t = findReminder(store, parentTitle, testListName);
+        NSString *rem43tID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem43t, sel_registerName("objectID")));
+        int rTag = cmdAddTag(store, rem43tID, @"filter-test-tag");
+        if (rTag != 0) { fprintf(stderr, "  FAIL (could not add tag)\n"); failed++; }
+        else {
+            // --tag should return only reminders with the tag
+            __block int rInclude = -1;
+            NSData *outInclude = captureStdout(^{ rInclude = cmdList(store, testListName, NO, @"filter-test-tag", nil, NO); });
+            // --exclude-tag should return reminders WITHOUT the tag
+            __block int rExclude = -1;
+            NSData *outExclude = captureStdout(^{ rExclude = cmdList(store, testListName, NO, nil, @"filter-test-tag", NO); });
+            // --tag + --exclude-tag combined (different tags)
+            __block int rAll = -1;
+            NSData *outAll = captureStdout(^{ rAll = cmdList(store, testListName, NO, nil, nil, NO); });
+
+            if (rInclude != 0 || rExclude != 0 || rAll != 0) {
+                fprintf(stderr, "  FAIL (cmdList returned non-zero)\n"); failed++;
+            } else {
+                id jsonInclude = parseJSONFromData(outInclude);
+                id jsonExclude = parseJSONFromData(outExclude);
+                id jsonAll = parseJSONFromData(outAll);
+                NSUInteger countInclude = [jsonInclude count];
+                NSUInteger countExclude = [jsonExclude count];
+                NSUInteger countAll = [jsonAll count];
+                // Include should find at least 1 (the tagged one)
+                // Exclude should find fewer than all
+                // Include + exclude should equal all
+                if (countInclude >= 1 && countExclude < countAll && countInclude + countExclude == countAll) {
+                    fprintf(stderr, "  PASS (include=%lu, exclude=%lu, all=%lu)\n",
+                        (unsigned long)countInclude, (unsigned long)countExclude, (unsigned long)countAll); passed++;
+                } else {
+                    fprintf(stderr, "  FAIL (include=%lu, exclude=%lu, all=%lu)\n",
+                        (unsigned long)countInclude, (unsigned long)countExclude, (unsigned long)countAll); failed++;
+                }
+            }
+            // Clean up tag
+            cmdRemoveTag(store, rem43tID, @"filter-test-tag");
+        }
+    }
+
+    // Test 44: cmdList --has-url filter
+    fprintf(stderr, "Test 44: cmdList --has-url filter...\n");
+    {
+        // Set a URL on the parent reminder
+        id rem43 = findReminder(store, parentTitle, testListName);
+        NSString *rem43ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem43, sel_registerName("objectID")));
+        int r43 = cmdUpdate(store, testListName, @{@"id": rem43ID, @"url": @"https://example.com"});
+        if (r43 != 0) { fprintf(stderr, "  FAIL (could not set URL)\n"); failed++; }
+        else {
+            __block int rAll = -1, rFiltered = -1;
+            NSData *outAll = captureStdout(^{ rAll = cmdList(store, testListName, YES, nil, nil, NO); });
+            NSData *outFiltered = captureStdout(^{ rFiltered = cmdList(store, testListName, YES, nil, nil, YES); });
+            if (rAll != 0 || rFiltered != 0) {
+                fprintf(stderr, "  FAIL (cmdList returned non-zero)\n"); failed++;
+            } else {
+                id jsonAll = parseJSONFromData(outAll);
+                id jsonFiltered = parseJSONFromData(outFiltered);
+                NSUInteger countAll = [jsonAll count];
+                NSUInteger countFiltered = [jsonFiltered count];
+                if (countFiltered < countAll && countFiltered >= 1 && jsonArrayFind(jsonFiltered, @"title", parentTitle)) {
+                    fprintf(stderr, "  PASS (all=%lu, filtered=%lu)\n", (unsigned long)countAll, (unsigned long)countFiltered); passed++;
+                } else {
+                    fprintf(stderr, "  FAIL (all=%lu, filtered=%lu)\n", (unsigned long)countAll, (unsigned long)countFiltered); failed++;
+                }
+            }
+        }
+    }
+
     // Cleanup
-    // Test 43: cmdDelete child
-    fprintf(stderr, "Test 43: cmdDelete child...\n");
+    // Test 45: cmdDelete child
+    fprintf(stderr, "Test 45: cmdDelete child...\n");
     {
         id rem38 = findReminder(store, childTitle, testListName);
         NSString *rem38ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem38, sel_registerName("objectID")));
@@ -794,17 +866,17 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 44: cmdDelete parent
-    fprintf(stderr, "Test 44: cmdDelete parent...\n");
+    // Test 46: cmdDelete parent
+    fprintf(stderr, "Test 46: cmdDelete parent...\n");
     {
-        id rem39 = findReminder(store, parentTitle, testListName);
-        NSString *rem39ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem39, sel_registerName("objectID")));
-        int r = cmdDelete(store, testListName, rem39ID);
+        id rem45 = findReminder(store, parentTitle, testListName);
+        NSString *rem45ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem45, sel_registerName("objectID")));
+        int r = cmdDelete(store, testListName, rem45ID);
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 45: cmdDeleteList
-    fprintf(stderr, "Test 45: cmdDeleteList...\n");
+    // Test 47: cmdDeleteList
+    fprintf(stderr, "Test 47: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
