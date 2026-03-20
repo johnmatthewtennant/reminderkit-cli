@@ -116,28 +116,17 @@ static id parseJSONFromData(NSData *data) {
 static NSData *captureStdoutWithStdin(NSString *stdinStr, void (^block)(void)) {
     fflush(stdout);
     fflush(stdin);
-
-    // Create a pipe for stdin
     int stdinPipe[2];
     if (pipe(stdinPipe) < 0) return nil;
-
-    // Write input data to the pipe
     NSData *inputData = [stdinStr dataUsingEncoding:NSUTF8StringEncoding];
     write(stdinPipe[1], inputData.bytes, inputData.length);
     close(stdinPipe[1]);
-
-    // Redirect stdin
     int savedStdin = dup(STDIN_FILENO);
     dup2(stdinPipe[0], STDIN_FILENO);
     close(stdinPipe[0]);
-
-    // Use captureStdout for the output side
     NSData *result = captureStdout(block);
-
-    // Restore stdin
     dup2(savedStdin, STDIN_FILENO);
     close(savedStdin);
-
     return result;
 }
 
@@ -690,7 +679,7 @@ static int cmdTest(id store) {
                 id b1 = findReminder(store, @"__batch_test_1__", testListName);
                 id b2 = findReminder(store, @"__batch_test_2__", testListName);
                 if (b1 && b2) { fprintf(stderr, "  PASS\n"); passed++; }
-                else { fprintf(stderr, "  FAIL (reminders not found after batch add)\n"); failed++; }
+                else { fprintf(stderr, "  FAIL (reminders not found)\n"); failed++; }
             }
         }
     }
@@ -699,12 +688,10 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 39: batch append-notes...\n");
     {
         id rem39 = findReminder(store, @"__batch_test_1__", testListName);
-        if (!rem39) { fprintf(stderr, "  FAIL (test reminder not found)\n"); failed++; }
+        if (!rem39) { fprintf(stderr, "  FAIL (not found)\n"); failed++; }
         else {
             NSString *rem39ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem39, sel_registerName("objectID")));
-            NSString *batchJSON = [NSString stringWithFormat:@"["
-                @"{\"op\":\"update\",\"id\":\"%@\",\"append-notes\":\"appended line\"}"
-                @"]", rem39ID];
+            NSString *batchJSON = [NSString stringWithFormat:@"[{\"op\":\"update\",\"id\":\"%@\",\"append-notes\":\"appended line\"}]", rem39ID];
             __block int r = -1;
             captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
             if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
@@ -713,9 +700,7 @@ static int cmdTest(id store) {
                 NSString *notes = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("notesAsString"));
                 if (notes && [notes containsString:@"initial notes"] && [notes containsString:@"appended line"]) {
                     fprintf(stderr, "  PASS\n"); passed++;
-                } else {
-                    fprintf(stderr, "  FAIL (notes=%s)\n", [notes UTF8String]); failed++;
-                }
+                } else { fprintf(stderr, "  FAIL (notes=%s)\n", [notes UTF8String]); failed++; }
             }
         }
     }
@@ -724,16 +709,20 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 40: batch add-tag...\n");
     {
         id rem40 = findReminder(store, @"__batch_test_1__", testListName);
-        if (!rem40) { fprintf(stderr, "  FAIL (test reminder not found)\n"); failed++; }
+        if (!rem40) { fprintf(stderr, "  FAIL (not found)\n"); failed++; }
         else {
             NSString *rem40ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem40, sel_registerName("objectID")));
-            NSString *batchJSON = [NSString stringWithFormat:@"["
-                @"{\"op\":\"add-tag\",\"id\":\"%@\",\"tag\":\"batch-test-tag\"}"
-                @"]", rem40ID];
+            NSString *batchJSON = [NSString stringWithFormat:@"[{\"op\":\"add-tag\",\"id\":\"%@\",\"tag\":\"batch-test-tag\"}]", rem40ID];
             __block int r = -1;
             NSData *out = captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
             if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
             else {
+                // Verify output shape
+                id json = parseJSONFromData(out);
+                BOOL outputOK = [json isKindOfClass:[NSArray class]] && [(NSArray *)json count] == 1
+                    && [((NSArray *)json)[0][@"status"] isEqualToString:@"ok"]
+                    && [((NSArray *)json)[0][@"op"] isEqualToString:@"add-tag"];
+                // Verify tag on reminder
                 id updated = findReminder(store, @"__batch_test_1__", testListName);
                 NSSet *tags = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("hashtags"));
                 BOOL found = NO;
@@ -741,8 +730,8 @@ static int cmdTest(id store) {
                     NSString *name = ((id (*)(id, SEL))objc_msgSend)(tag, sel_registerName("name"));
                     if ([name isEqualToString:@"batch-test-tag"]) { found = YES; break; }
                 }
-                if (found) { fprintf(stderr, "  PASS\n"); passed++; }
-                else { fprintf(stderr, "  FAIL (tag not found on reminder)\n"); failed++; }
+                if (found && outputOK) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (tag found=%d, outputOK=%d)\n", found, outputOK); failed++; }
             }
         }
     }
@@ -751,12 +740,10 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 41: batch remove-tag...\n");
     {
         id rem41 = findReminder(store, @"__batch_test_1__", testListName);
-        if (!rem41) { fprintf(stderr, "  FAIL (test reminder not found)\n"); failed++; }
+        if (!rem41) { fprintf(stderr, "  FAIL (not found)\n"); failed++; }
         else {
             NSString *rem41ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem41, sel_registerName("objectID")));
-            NSString *batchJSON = [NSString stringWithFormat:@"["
-                @"{\"op\":\"remove-tag\",\"id\":\"%@\",\"tag\":\"batch-test-tag\"}"
-                @"]", rem41ID];
+            NSString *batchJSON = [NSString stringWithFormat:@"[{\"op\":\"remove-tag\",\"id\":\"%@\",\"tag\":\"batch-test-tag\"}]", rem41ID];
             __block int r = -1;
             captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
             if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
@@ -774,23 +761,26 @@ static int cmdTest(id store) {
         }
     }
 
-    // Test 42: batch delete (cleanup batch test reminders)
+    // Test 42: batch delete
     fprintf(stderr, "Test 42: batch delete...\n");
     {
         id b1 = findReminder(store, @"__batch_test_1__", testListName);
         id b2 = findReminder(store, @"__batch_test_2__", testListName);
-        if (!b1 || !b2) { fprintf(stderr, "  FAIL (test reminders not found)\n"); failed++; }
+        if (!b1 || !b2) { fprintf(stderr, "  FAIL (not found)\n"); failed++; }
         else {
             NSString *b1ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(b1, sel_registerName("objectID")));
             NSString *b2ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(b2, sel_registerName("objectID")));
-            NSString *batchJSON = [NSString stringWithFormat:@"["
-                @"{\"op\":\"delete\",\"id\":\"%@\"},"
-                @"{\"op\":\"delete\",\"id\":\"%@\"}"
-                @"]", b1ID, b2ID];
+            NSString *batchJSON = [NSString stringWithFormat:@"[{\"op\":\"delete\",\"id\":\"%@\"},{\"op\":\"delete\",\"id\":\"%@\"}]", b1ID, b2ID];
             __block int r = -1;
             captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
             if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
-            else { fprintf(stderr, "  PASS\n"); passed++; }
+            else {
+                // Verify reminders are actually deleted
+                id gone1 = findReminder(store, @"__batch_test_1__", testListName);
+                id gone2 = findReminder(store, @"__batch_test_2__", testListName);
+                if (!gone1 && !gone2) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (reminders still exist after delete)\n"); failed++; }
+            }
         }
     }
 
