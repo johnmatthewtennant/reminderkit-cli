@@ -43,7 +43,7 @@ static int cmdBatch(id store) {
         }
         // Require id for non-add ops
         if (![opType isEqualToString:@"add"]) {
-            if (!op[@"id"] || [op[@"id"] length] == 0) {
+            if (!op[@"id"] || ![op[@"id"] isKindOfClass:[NSString class]] || [op[@"id"] length] == 0) {
                 errorExit([NSString stringWithFormat:@"Operation %lu (%@) requires id", (unsigned long)i, opType]);
             }
         } else {
@@ -53,7 +53,7 @@ static int cmdBatch(id store) {
         }
         // Require tag for add-tag/remove-tag ops
         if ([opType isEqualToString:@"add-tag"] || [opType isEqualToString:@"remove-tag"]) {
-            if (!op[@"tag"] || [op[@"tag"] length] == 0) {
+            if (!op[@"tag"] || ![op[@"tag"] isKindOfClass:[NSString class]] || [op[@"tag"] length] == 0) {
                 errorExit([NSString stringWithFormat:@"Operation %lu (%@) requires tag", (unsigned long)i, opType]);
             }
         }
