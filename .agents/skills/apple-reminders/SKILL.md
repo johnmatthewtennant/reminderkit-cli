@@ -28,6 +28,8 @@ Command-line interface for Apple Reminders. Built on the private ReminderKit fra
 - `reminderkit complete --id <id>` — complete a reminder
 - `reminderkit list --name "List"` — list reminders in a list
 - `reminderkit get --title "Title" --list "List"` — find a reminder by title
+- `reminderkit get --url <url> [--list "List"]` — find a reminder by URL field (normalizes trailing slashes)
+- `reminderkit get --id <id>` — fetch a reminder by ID (faster, no list scan needed)
 
 ## Linking reminders to Apple Notes
 

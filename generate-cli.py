@@ -269,6 +269,14 @@ static id findReminder(id store, NSString *title, NSString *listName) {
     return nil;
 }
 
+static NSString *normalizeURL(NSString *url) {
+    // Strip trailing slash for comparison
+    while ([url hasSuffix:@"/"]) {
+        url = [url substringToIndex:url.length - 1];
+    }
+    return [url lowercaseString];
+}
+
 static NSArray *findReminders(id store, NSString *title, NSString *listName) {
     NSArray *lists;
     if (listName) {
@@ -290,6 +298,37 @@ static NSArray *findReminders(id store, NSString *title, NSString *listName) {
             if ([lowerT rangeOfString:lowerTitle].location != NSNotFound) {
                 [results addObject:rem];
             }
+        }
+    }
+    return results;
+}
+
+static NSArray *findRemindersByURL(id store, NSString *url, NSString *listName) {
+    NSArray *lists;
+    if (listName) {
+        id list = findList(store, listName);
+        if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
+        lists = @[list];
+    } else {
+        lists = fetchLists(store);
+    }
+    NSMutableArray *results = [NSMutableArray array];
+    NSString *normalizedSearch = normalizeURL(url);
+    for (id list in lists) {
+        NSArray *rems = fetchReminders(store, list, NO);
+        for (id rem in rems) {
+            @try {
+                id attCtx = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("attachmentContext"));
+                if (!attCtx) continue;
+                NSArray *urlAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("urlAttachments"));
+                if (urlAtts.count == 0) continue;
+                NSURL *attUrl = ((id (*)(id, SEL))objc_msgSend)(urlAtts[0], sel_registerName("url"));
+                if (!attUrl) continue;
+                NSString *normalizedAtt = normalizeURL([attUrl absoluteString]);
+                if ([normalizedAtt isEqualToString:normalizedSearch]) {
+                    [results addObject:rem];
+                }
+            } @catch (NSException *e) {}
         }
     }
     return results;
@@ -471,9 +510,60 @@ static int cmdList(id store, NSString *listName, BOOL includeCompleted) {
     return 0;
 }
 
-static int cmdGet(id store, NSString *title, NSString *listName) {
-    NSArray *matches = findReminders(store, title, listName);
-    if (matches.count == 0) errorExit([NSString stringWithFormat:@"Reminder not found: %@", title]);
+static int cmdGetByID(id store, NSString *remID) {
+    id rem = findReminderByID(store, remID);
+    if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", remID]);
+
+    NSMutableDictionary *dict = [reminderToDict(rem) mutableCopy];
+
+    // Add subtasks
+    id parentObjID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));
+    NSString *parentIDStr = objectIDToString(parentObjID);
+    id listID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("listID"));
+    NSError *error = nil;
+    NSArray *allInList = ((id (*)(id, SEL, id, id*))objc_msgSend)(
+        store, sel_registerName("fetchRemindersForEventKitBridgingWithListIDs:error:"),
+        @[listID], &error);
+
+    NSMutableArray *subtasks = [NSMutableArray array];
+    for (id sub in allInList) {
+        id pid = ((id (*)(id, SEL))objc_msgSend)(sub, sel_registerName("parentReminderID"));
+        if (pid && [objectIDToString(pid) isEqualToString:parentIDStr]) {
+            [subtasks addObject:reminderToDict(sub)];
+        }
+    }
+    if (subtasks.count > 0) dict[@"subtasks"] = subtasks;
+
+    printJSON(dict);
+    return 0;
+}
+
+static int cmdGet(id store, NSString *title, NSString *listName, NSString *urlFilter) {
+    NSArray *matches;
+    if (urlFilter) {
+        matches = findRemindersByURL(store, urlFilter, listName);
+        if (title) {
+            // Filter by both URL and title
+            NSString *normalizedTitle = normalizeQuotes(title);
+            NSString *lowerTitle = [normalizedTitle lowercaseString];
+            NSMutableArray *filtered = [NSMutableArray array];
+            for (id rem in matches) {
+                NSString *t = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("titleAsString"));
+                if (!t) continue;
+                NSString *lowerT = [[normalizeQuotes(t) lowercaseString] copy];
+                if ([lowerT rangeOfString:lowerTitle].location != NSNotFound) {
+                    [filtered addObject:rem];
+                }
+            }
+            matches = filtered;
+        }
+    } else {
+        matches = findReminders(store, title, listName);
+    }
+    if (matches.count == 0) {
+        NSString *desc = urlFilter ? urlFilter : title;
+        errorExit([NSString stringWithFormat:@"Reminder not found: %@", desc]);
+    }
 
     NSMutableArray *resultArray = [NSMutableArray array];
     for (id rem in matches) {
@@ -1386,7 +1476,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 4: cmdGet JSON shape...\\n");
     {
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName); });
+        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -2006,8 +2096,10 @@ static void usage(void) {
     fprintf(stderr, "Usage:\\n");
     fprintf(stderr, "  reminderkit lists\\n");
     fprintf(stderr, "  reminderkit list --name <name> [--include-completed]\\n");
-    fprintf(stderr, "  reminderkit search --title <title> [--list <name>]\\n");
-    fprintf(stderr, "  reminderkit get --title <title> [--list <name>]  (alias for search)\\n");
+    fprintf(stderr, "  reminderkit search --title <title> [--url <url>] [--list <name>]\\n");
+    fprintf(stderr, "  reminderkit search --id <id>\\n");
+    fprintf(stderr, "  reminderkit get --title <title> [--url <url>] [--list <name>]  (alias for search)\\n");
+    fprintf(stderr, "  reminderkit get --id <id>\\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\\n");
     fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\\n");
     fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\\n");
@@ -2101,8 +2193,11 @@ int main(int argc, const char *argv[]) {
             return cmdList(store, kwName, includeCompleted);
 
         } else if ([command isEqualToString:@"search"] || [command isEqualToString:@"get"]) {
-            if (!kwTitle) { fprintf(stderr, "Error: --title required\\n"); usage(); return 1; }
-            return cmdGet(store, kwTitle, listName);
+            if (opts[@"id"] && [opts[@"id"] length] > 0) {
+                return cmdGetByID(store, opts[@"id"]);
+            }
+            if (!kwTitle && !opts[@"url"]) { fprintf(stderr, "Error: --title, --url, or --id required\\n"); usage(); return 1; }
+            return cmdGet(store, kwTitle, listName, opts[@"url"]);
 
         } else if ([command isEqualToString:@"subtasks"]) {
             if (!kwTitle) { fprintf(stderr, "Error: --title required\\n"); usage(); return 1; }
