@@ -856,9 +856,57 @@ static int cmdTest(id store) {
         }
     }
 
+
+    // Test 45: linkedNoteId field for applenotes:// URLs
+    fprintf(stderr, "Test 45: linkedNoteId for applenotes URLs...\n");
+    {
+        // Update parent reminder with an applenotes:// URL
+        id rem45n = findReminder(store, parentTitle, testListName);
+        NSString *rem45nID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem45n, sel_registerName("objectID")));
+        int r45 = cmdUpdate(store, testListName, @{@"id": rem45nID, @"url": @"applenotes://showNote?identifier=TEST-NOTE-UUID"});
+        if (r45 != 0) { fprintf(stderr, "  FAIL (could not set URL)\n"); failed++; }
+        else {
+            __block int r = -1;
+            NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil); });
+            if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+            else {
+                id json = parseJSONFromData(out);
+                NSString *linkedNoteId = json[@"linkedNoteId"];
+                NSString *url = json[@"url"];
+                BOOL hasLinkedNote = [linkedNoteId isEqualToString:@"TEST-NOTE-UUID"];
+                BOOL hasUrl = [url containsString:@"applenotes"];
+                if (hasLinkedNote && hasUrl) {
+                    fprintf(stderr, "  PASS\n"); passed++;
+                } else {
+                    fprintf(stderr, "  FAIL (linkedNoteId=%s, url=%s)\n",
+                        [linkedNoteId UTF8String], [url UTF8String]); failed++;
+                }
+            }
+        }
+        // Reset to non-applenotes URL and verify linkedNoteId is absent
+        cmdUpdate(store, testListName, @{@"id": rem45nID, @"url": @"https://example.com"});
+    }
+
+    // Test 46: linkedNoteId absent for non-applenotes URLs
+    fprintf(stderr, "Test 46: no linkedNoteId for non-applenotes URLs...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (json[@"linkedNoteId"] == nil && json[@"url"] != nil) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else {
+                fprintf(stderr, "  FAIL (linkedNoteId should be nil, got %s)\n",
+                    [json[@"linkedNoteId"] UTF8String]); failed++;
+            }
+        }
+    }
+
     // Cleanup
-    // Test 45: cmdDelete child
-    fprintf(stderr, "Test 45: cmdDelete child...\n");
+    // Test 47: cmdDelete child
+    fprintf(stderr, "Test 47: cmdDelete child...\n");
     {
         id rem38 = findReminder(store, childTitle, testListName);
         NSString *rem38ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem38, sel_registerName("objectID")));
@@ -866,8 +914,8 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 46: cmdDelete parent
-    fprintf(stderr, "Test 46: cmdDelete parent...\n");
+    // Test 48: cmdDelete parent
+    fprintf(stderr, "Test 48: cmdDelete parent...\n");
     {
         id rem45 = findReminder(store, parentTitle, testListName);
         NSString *rem45ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem45, sel_registerName("objectID")));
@@ -875,8 +923,8 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 47: cmdDeleteList
-    fprintf(stderr, "Test 47: cmdDeleteList...\n");
+    // Test 49: cmdDeleteList
+    fprintf(stderr, "Test 49: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }

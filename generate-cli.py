@@ -472,7 +472,7 @@ def generate_reminder_to_dict():
     lines.append('                if (attUrl) {')
     lines.append('                    dict[@"url"] = [attUrl absoluteString];')
     lines.append('                    // Extract linkedNoteId from applenotes://showNote?identifier=UUID URLs')
-    lines.append('                    if ([[attUrl scheme] isEqualToString:@"applenotes"] && [[attUrl host] isEqualToString:@"showNote"]) {')
+    lines.append('                    if ([[[attUrl scheme] lowercaseString] isEqualToString:@"applenotes"] && [[[attUrl host] lowercaseString] isEqualToString:@"shownote"]) {')
     lines.append('                        NSURLComponents *comps = [NSURLComponents componentsWithURL:attUrl resolvingAgainstBaseURL:NO];')
     lines.append('                        for (NSURLQueryItem *item in comps.queryItems) {')
     lines.append('                            if ([item.name isEqualToString:@"identifier"] && item.value) {')
