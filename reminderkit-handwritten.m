@@ -258,6 +258,208 @@ static int cmdBatch(id store) {
 }
 
 
+// --- Assign/Unassign Commands ---
+
+static NSDictionary *shareeToDict(id sharee) {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    @try {
+        id objID = ((id (*)(id, SEL))objc_msgSend)(sharee, sel_registerName("objectID"));
+        if (objID) dict[@"id"] = objectIDToString(objID);
+    } @catch (NSException *e) {}
+    @try {
+        NSString *displayName = ((id (*)(id, SEL))objc_msgSend)(sharee, sel_registerName("displayName"));
+        if (displayName) dict[@"displayName"] = displayName;
+    } @catch (NSException *e) {}
+    @try {
+        NSString *firstName = ((id (*)(id, SEL))objc_msgSend)(sharee, sel_registerName("firstName"));
+        if (firstName) dict[@"firstName"] = firstName;
+    } @catch (NSException *e) {}
+    @try {
+        NSString *lastName = ((id (*)(id, SEL))objc_msgSend)(sharee, sel_registerName("lastName"));
+        if (lastName) dict[@"lastName"] = lastName;
+    } @catch (NSException *e) {}
+    @try {
+        NSString *address = ((id (*)(id, SEL))objc_msgSend)(sharee, sel_registerName("address"));
+        if (address) dict[@"address"] = address;
+    } @catch (NSException *e) {}
+    @try {
+        NSInteger accessLevel = ((NSInteger (*)(id, SEL))objc_msgSend)(sharee, sel_registerName("accessLevel"));
+        dict[@"accessLevel"] = @(accessLevel);
+    } @catch (NSException *e) {}
+    return dict;
+}
+
+static id findShareeByID(id list, NSString *shareeID) {
+    @try {
+        id shareeCtx = ((id (*)(id, SEL, id))objc_msgSend)(
+            [NSClassFromString(@"REMListShareeContext") alloc],
+            sel_registerName("initWithList:"), list);
+        NSArray *sharees = ((id (*)(id, SEL))objc_msgSend)(shareeCtx, sel_registerName("sharees"));
+        for (id sharee in sharees) {
+            id objID = ((id (*)(id, SEL))objc_msgSend)(sharee, sel_registerName("objectID"));
+            if (objID && [objectIDToString(objID) isEqualToString:shareeID]) {
+                return sharee;
+            }
+        }
+    } @catch (NSException *e) {}
+    return nil;
+}
+
+static NSString *extractUUIDFromObjectID(NSString *objIDStr) {
+    // objectID format: "emoji~<x-apple-reminderkit://REMCDSharee/UUID>"
+    // Extract the UUID after the last "/"
+    if (!objIDStr) return nil;
+    NSRange lastSlash = [objIDStr rangeOfString:@"/" options:NSBackwardsSearch];
+    if (lastSlash.location == NSNotFound) return objIDStr;
+    NSString *afterSlash = [objIDStr substringFromIndex:lastSlash.location + 1];
+    // Strip trailing ">" if present
+    if ([afterSlash hasSuffix:@">"]) {
+        afterSlash = [afterSlash substringToIndex:afterSlash.length - 1];
+    }
+    return afterSlash;
+}
+
+static id findShareeForCurrentUser(id list) {
+    NSString *currentUserID = ((id (*)(id, SEL))objc_msgSend)(
+        list, sel_registerName("currentUserShareParticipantID"));
+    if (!currentUserID) return nil;
+
+    id shareeCtx = ((id (*)(id, SEL, id))objc_msgSend)(
+        [NSClassFromString(@"REMListShareeContext") alloc],
+        sel_registerName("initWithList:"), list);
+    NSArray *sharees = ((id (*)(id, SEL))objc_msgSend)(shareeCtx, sel_registerName("sharees"));
+    for (id sharee in sharees) {
+        id objID = ((id (*)(id, SEL))objc_msgSend)(sharee, sel_registerName("objectID"));
+        NSString *objIDStr = objectIDToString(objID);
+        // Extract UUID from objectID and compare exactly
+        NSString *shareeUUID = extractUUIDFromObjectID(objIDStr);
+        if (shareeUUID && [shareeUUID isEqualToString:currentUserID]) {
+            return sharee;
+        }
+    }
+    return nil;
+}
+
+static int cmdListSharees(id store, NSString *listName) {
+    id list = findList(store, listName);
+    if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
+
+    @try {
+        id shareeCtx = ((id (*)(id, SEL, id))objc_msgSend)(
+            [NSClassFromString(@"REMListShareeContext") alloc],
+            sel_registerName("initWithList:"), list);
+        NSArray *sharees = ((id (*)(id, SEL))objc_msgSend)(shareeCtx, sel_registerName("sharees"));
+        NSMutableArray *result = [NSMutableArray array];
+        if (sharees) {
+            for (id sharee in sharees) {
+                [result addObject:shareeToDict(sharee)];
+            }
+        }
+
+        NSString *currentUserID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("currentUserShareParticipantID"));
+        NSMutableDictionary *response = [NSMutableDictionary dictionary];
+        response[@"sharees"] = result;
+        if (currentUserID) response[@"currentUserID"] = currentUserID;
+        printJSON(response);
+    } @catch (NSException *e) {
+        errorExit([NSString stringWithFormat:@"Failed to get sharees: %@", [e reason]]);
+    }
+    return 0;
+}
+
+static int cmdAssign(id store, NSString *remID, NSString *assigneeID) {
+    id rem = findReminderByID(store, remID);
+    if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", remID]);
+
+    id remListID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("listID"));
+    id list = findListByObjectID(store, remListID);
+    if (!list) errorExit(@"Could not find reminder's list");
+
+    id assignee = findShareeByID(list, assigneeID);
+    if (!assignee) {
+        errorExit([NSString stringWithFormat:@"Sharee not found with id: %@. Use 'list-sharees' to see available sharees.", assigneeID]);
+    }
+
+    id originator = findShareeForCurrentUser(list);
+
+    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+    id changeItem = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateReminder:"), rem);
+
+    id assignCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("assignmentContext"));
+    if (!assignCtx) errorExit(@"Could not get assignment context — list may not be shared");
+
+    // status 0 = assigned
+    ((void (*)(id, SEL, id, id, NSInteger))objc_msgSend)(
+        assignCtx, sel_registerName("addAssignmentWithAssignee:originator:status:"),
+        assignee, originator, (NSInteger)0);
+
+    NSError *error = nil;
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+        saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    id updated = findReminderByID(store, remID);
+    if (updated) printJSON(reminderToDict(updated));
+    else fprintf(stderr, "Assigned successfully\n");
+    return 0;
+}
+
+static int cmdUnassign(id store, NSString *remID, NSString *assigneeID) {
+    id rem = findReminderByID(store, remID);
+    if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", remID]);
+
+    id assignCtx = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("assignmentContext"));
+    if (!assignCtx) errorExit(@"Reminder has no assignment context — list may not be shared");
+
+    NSSet *assignments = ((id (*)(id, SEL))objc_msgSend)(assignCtx, sel_registerName("assignments"));
+    if (!assignments || assignments.count == 0) {
+        errorExit(@"Reminder has no assignments");
+    }
+
+    id targetAssignment = nil;
+    if (assigneeID) {
+        for (id a in assignments) {
+            id aID = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("assigneeID"));
+            if (aID && [objectIDToString(aID) isEqualToString:assigneeID]) {
+                targetAssignment = a;
+                break;
+            }
+        }
+        if (!targetAssignment) {
+            errorExit([NSString stringWithFormat:@"No assignment found for assignee: %@", assigneeID]);
+        }
+    }
+
+    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+    id changeItem = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateReminder:"), rem);
+
+    id assignCtxCI = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("assignmentContext"));
+    if (!assignCtxCI) errorExit(@"Could not get assignment context change item");
+
+    if (assigneeID) {
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            assignCtxCI, sel_registerName("removeAssignment:"), targetAssignment);
+    } else {
+        ((void (*)(id, SEL))objc_msgSend)(
+            assignCtxCI, sel_registerName("removeAllAssignments"));
+    }
+
+    NSError *error = nil;
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+        saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    id updated = findReminderByID(store, remID);
+    if (updated) printJSON(reminderToDict(updated));
+    else fprintf(stderr, "Unassigned successfully\n");
+    return 0;
+}
+
+
 // --- Install Skill ---
 
 static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
