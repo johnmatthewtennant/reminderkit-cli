@@ -2138,7 +2138,7 @@ def generate_usage():
 static void usage(void) {
     fprintf(stderr, "Usage:\\n");
     fprintf(stderr, "  reminderkit lists\\n");
-    fprintf(stderr, "  reminderkit list --name <name> [--include-completed] [--tag <tags>] [--exclude-tag <tags>]\\n");
+    fprintf(stderr, "  reminderkit list --name <name> [--include-completed] [--tag <tags>] [--exclude-tag <tags>] [--has-url]\\n");
     fprintf(stderr, "  reminderkit search --title <title> [--url <url>] [--list <name>]\\n");
     fprintf(stderr, "  reminderkit search --id <id>\\n");
     fprintf(stderr, "  reminderkit get --title <title> [--url <url>] [--list <name>]  (alias for search)\\n");
@@ -2181,6 +2181,7 @@ int main(int argc, const char *argv[]) {
         NSMutableArray *positional = [NSMutableArray array];
         NSMutableDictionary *opts = [NSMutableDictionary dictionary];
         BOOL includeCompleted = NO;
+        BOOL hasURL = NO;
 
         for (int i = 2; i < argc; i++) {
             NSString *arg = [NSString stringWithUTF8String:argv[i]];
@@ -2191,10 +2192,12 @@ int main(int argc, const char *argv[]) {
                     [flag isEqualToString:@"remove-from-list"] ||
                     [flag isEqualToString:@"help"] ||
                     [flag isEqualToString:@"clear-url"] ||
+                    [flag isEqualToString:@"has-url"] ||
                     [flag isEqualToString:@"claude"] ||
                     [flag isEqualToString:@"agents"] ||
                     [flag isEqualToString:@"force"]) {
                     if ([flag isEqualToString:@"include-completed"]) includeCompleted = YES;
+                    if ([flag isEqualToString:@"has-url"]) hasURL = YES;
                     opts[flag] = @"true";
                 } else if (i + 1 < argc) {
                     opts[flag] = [NSString stringWithUTF8String:argv[++i]];
