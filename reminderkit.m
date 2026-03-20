@@ -36,6 +36,8 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit install-skill [--claude] [--agents] [--force]\n");
     fprintf(stderr, "\n  Testing:\n");
     fprintf(stderr, "  reminderkit test\n");
+    fprintf(stderr, "\n  Report issues:\n");
+    fprintf(stderr, "  gh api repos/johnmatthewtennant/reminderkit-cli/issues --method POST -f title=\"...\" -f body=\"...\"\n");
 }
 
 
