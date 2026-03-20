@@ -950,6 +950,22 @@ static int cmdTest(id store) {
         cmdRemoveTag(store, remTID, @"test-exclude-tag");
     }
 
+    // Test: cmdGet filter-only with zero results returns empty array (regression)
+    fprintf(stderr, "Test: cmdGet zero-result filter returns empty array...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, @"nonexistent-tag-xyz", nil, NO); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d, expected 0)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if ([json isKindOfClass:[NSArray class]] && [(NSArray *)json count] == 0) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else {
+                fprintf(stderr, "  FAIL (expected empty array [])\n"); failed++;
+            }
+        }
+    }
+
     // Test: cmdGet with --list only (no title/url/tag)
     fprintf(stderr, "Test: cmdGet --list only...\n");
     {
