@@ -412,7 +412,19 @@ static NSDictionary *reminderToDict(id rem) {
             NSArray *urlAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("urlAttachments"));
             if (urlAtts.count > 0) {
                 NSURL *attUrl = ((id (*)(id, SEL))objc_msgSend)(urlAtts[0], sel_registerName("url"));
-                if (attUrl) dict[@"url"] = [attUrl absoluteString];
+                if (attUrl) {
+                    dict[@"url"] = [attUrl absoluteString];
+                    // Extract linkedNoteId from applenotes://showNote?identifier=UUID URLs
+                    if ([[attUrl scheme] isEqualToString:@"applenotes"] && [[attUrl host] isEqualToString:@"showNote"]) {
+                        NSURLComponents *comps = [NSURLComponents componentsWithURL:attUrl resolvingAgainstBaseURL:NO];
+                        for (NSURLQueryItem *item in comps.queryItems) {
+                            if ([item.name isEqualToString:@"identifier"] && item.value) {
+                                dict[@"linkedNoteId"] = item.value;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
     } @catch (NSException *e) {}
