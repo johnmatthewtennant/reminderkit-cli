@@ -19,11 +19,12 @@ static int cmdBatch(id store) {
     if (![parsed isKindOfClass:[NSArray class]]) errorExit(@"Expected JSON array");
 
     NSArray *ops = (NSArray *)parsed;
-    NSSet *validOps = [NSSet setWithArray:@[@"add", @"complete", @"update", @"delete"]];
+    NSSet *validOps = [NSSet setWithArray:@[@"add", @"complete", @"update", @"delete",
+        @"add-tag", @"remove-tag"]];
     NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
-        @"notes", @"priority", @"flagged", @"completed",
-        @"due-date", @"start-date", @"url", @"remove-parent", @"remove-from-list",
-        @"parent-id", @"to-list"]];
+        @"notes", @"append-notes", @"priority", @"flagged", @"completed",
+        @"due-date", @"start-date", @"url", @"clear-url", @"remove-parent", @"remove-from-list",
+        @"parent-id", @"to-list", @"tag"]];
 
     // Validate all operations first
     for (NSUInteger i = 0; i < ops.count; i++) {
@@ -49,6 +50,12 @@ static int cmdBatch(id store) {
         } else {
             if (!op[@"title"]) {
                 errorExit([NSString stringWithFormat:@"Operation %lu (add) requires title", (unsigned long)i]);
+            }
+        }
+        // Require tag for add-tag/remove-tag ops
+        if ([opType isEqualToString:@"add-tag"] || [opType isEqualToString:@"remove-tag"]) {
+            if (!op[@"tag"] || [op[@"tag"] length] == 0) {
+                errorExit([NSString stringWithFormat:@"Operation %lu (%@) requires tag", (unsigned long)i, opType]);
             }
         }
     }
@@ -134,7 +141,18 @@ static int cmdBatch(id store) {
 
             } else if ([opType isEqualToString:@"update"]) {
                 if (op[@"title"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setTitleAsString:"), op[@"title"]);
-                if (op[@"notes"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setNotesAsString:"), op[@"notes"]);
+                if (op[@"append-notes"]) {
+                    NSString *existing = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("notesAsString"));
+                    NSString *combined;
+                    if (existing && [existing length] > 0) {
+                        combined = [NSString stringWithFormat:@"%@\n%@", existing, op[@"append-notes"]];
+                    } else {
+                        combined = op[@"append-notes"];
+                    }
+                    ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setNotesAsString:"), combined);
+                } else if (op[@"notes"]) {
+                    ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setNotesAsString:"), op[@"notes"]);
+                }
                 if (op[@"priority"]) ((void (*)(id, SEL, NSUInteger))objc_msgSend)(changeItem, sel_registerName("setPriority:"), [op[@"priority"] integerValue]);
                 if (op[@"flagged"]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(changeItem, sel_registerName("setFlagged:"), [op[@"flagged"] integerValue]);
                 if (op[@"completed"]) {
@@ -144,9 +162,65 @@ static int cmdBatch(id store) {
                 if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
                 if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
                 if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext")); ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), u); } }
+                if (op[@"clear-url"]) {
+                    id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext"));
+                    ((void (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("removeURLAttachments"));
+                }
                 if (op[@"remove-parent"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromParentReminder"));
                 if (op[@"remove-from-list"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));
+
+                // Reparent: parent-id
+                if (op[@"parent-id"]) {
+                    NSString *parentID = op[@"parent-id"];
+                    id parentRem = findReminderByID(store, parentID);
+                    if (!parentRem) errorExit([NSString stringWithFormat:@"Parent not found with id: %@", parentID]);
+                    id parentObjID = ((id (*)(id, SEL))objc_msgSend)(parentRem, sel_registerName("objectID"));
+                    if ([objectIDToString(remObjID) isEqualToString:objectIDToString(parentObjID)]) {
+                        errorExit(@"Cannot set a reminder as its own parent");
+                    }
+                    id remListID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("listID"));
+                    id targetList = findListByObjectID(store, remListID);
+                    if (!targetList) errorExit(@"Could not find list for reparenting");
+                    id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                        saveReq, sel_registerName("updateList:"), targetList);
+                    reparentChangeItem(store, saveReq, listCI, changeItem, parentID);
+                }
+
+                // Move to different list: to-list
+                NSString *toListName = op[@"to-list"];
+                if (toListName) {
+                    id destList = findList(store, toListName);
+                    if (!destList) errorExit([NSString stringWithFormat:@"Destination list not found: %@", toListName]);
+                    id destListCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                        saveReq, sel_registerName("updateList:"), destList);
+                    Class REMReminderCIClass = NSClassFromString(@"REMReminderChangeItem");
+                    id moveCI = ((id (*)(id, SEL, id, id))objc_msgSend)(
+                        [REMReminderCIClass alloc],
+                        sel_registerName("initWithReminderChangeItem:insertIntoListChangeItem:"),
+                        changeItem, destListCI);
+                    if (!moveCI) errorExit(@"Failed to create move operation");
+                }
+
                 [results addObject:@{@"op": @"update", @"id": remIDStr ?: @"", @"status": @"ok"}];
+
+            } else if ([opType isEqualToString:@"add-tag"]) {
+                id hashtagCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("hashtagContext"));
+                if (!hashtagCtx) errorExit(@"Failed to get hashtag context");
+                ((void (*)(id, SEL, NSUInteger, id))objc_msgSend)(
+                    hashtagCtx, sel_registerName("addHashtagWithType:name:"), (NSUInteger)0, op[@"tag"]);
+                [results addObject:@{@"op": @"add-tag", @"id": remIDStr ?: @"", @"tag": op[@"tag"], @"status": @"ok"}];
+
+            } else if ([opType isEqualToString:@"remove-tag"]) {
+                NSSet *tags = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("hashtags"));
+                id tagToRemove = nil;
+                for (id tag in tags) {
+                    NSString *name = ((id (*)(id, SEL))objc_msgSend)(tag, sel_registerName("name"));
+                    if ([name isEqualToString:op[@"tag"]]) { tagToRemove = tag; break; }
+                }
+                if (!tagToRemove) errorExit([NSString stringWithFormat:@"Tag not found: %@", op[@"tag"]]);
+                id hashtagCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("hashtagContext"));
+                ((void (*)(id, SEL, id))objc_msgSend)(hashtagCtx, sel_registerName("removeHashtag:"), tagToRemove);
+                [results addObject:@{@"op": @"remove-tag", @"id": remIDStr ?: @"", @"tag": op[@"tag"], @"status": @"ok"}];
             }
         }
     }

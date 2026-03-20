@@ -112,6 +112,24 @@ static id parseJSONFromData(NSData *data) {
     return result;
 }
 
+// Capture stdout from a block that reads from stdin, feeding stdinStr as input.
+static NSData *captureStdoutWithStdin(NSString *stdinStr, void (^block)(void)) {
+    fflush(stdout);
+    fflush(stdin);
+    int stdinPipe[2];
+    if (pipe(stdinPipe) < 0) return nil;
+    NSData *inputData = [stdinStr dataUsingEncoding:NSUTF8StringEncoding];
+    write(stdinPipe[1], inputData.bytes, inputData.length);
+    close(stdinPipe[1]);
+    int savedStdin = dup(STDIN_FILENO);
+    dup2(stdinPipe[0], STDIN_FILENO);
+    close(stdinPipe[0]);
+    NSData *result = captureStdout(block);
+    dup2(savedStdin, STDIN_FILENO);
+    close(savedStdin);
+    return result;
+}
+
 // Check that a JSON array contains at least one dict with the given key.
 static BOOL jsonArrayHasKey(NSArray *arr, NSString *key) {
     for (NSDictionary *item in arr) {
@@ -641,9 +659,122 @@ static int cmdTest(id store) {
         else { failed++; }
     }
 
+    // --- Batch Tests ---
+
+    // Test 38: batch add
+    fprintf(stderr, "Test 38: batch add...\n");
+    {
+        NSString *batchJSON = [NSString stringWithFormat:@"["
+            @"{\"op\":\"add\",\"title\":\"__batch_test_1__\",\"list\":\"%@\",\"notes\":\"initial notes\"},"
+            @"{\"op\":\"add\",\"title\":\"__batch_test_2__\",\"list\":\"%@\"}"
+            @"]", testListName, testListName];
+        __block int r = -1;
+        NSData *out = captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]] || [(NSArray *)json count] != 2) {
+                fprintf(stderr, "  FAIL (expected 2-element array)\n"); failed++;
+            } else {
+                id b1 = findReminder(store, @"__batch_test_1__", testListName);
+                id b2 = findReminder(store, @"__batch_test_2__", testListName);
+                if (b1 && b2) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (reminders not found)\n"); failed++; }
+            }
+        }
+    }
+
+    // Test 39: batch append-notes
+    fprintf(stderr, "Test 39: batch append-notes...\n");
+    {
+        id rem39 = findReminder(store, @"__batch_test_1__", testListName);
+        if (!rem39) { fprintf(stderr, "  FAIL (not found)\n"); failed++; }
+        else {
+            NSString *rem39ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem39, sel_registerName("objectID")));
+            NSString *batchJSON = [NSString stringWithFormat:@"[{\"op\":\"update\",\"id\":\"%@\",\"append-notes\":\"appended line\"}]", rem39ID];
+            __block int r = -1;
+            captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
+            if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+            else {
+                id updated = findReminder(store, @"__batch_test_1__", testListName);
+                NSString *notes = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("notesAsString"));
+                if (notes && [notes containsString:@"initial notes"] && [notes containsString:@"appended line"]) {
+                    fprintf(stderr, "  PASS\n"); passed++;
+                } else { fprintf(stderr, "  FAIL (notes=%s)\n", [notes UTF8String]); failed++; }
+            }
+        }
+    }
+
+    // Test 40: batch add-tag
+    fprintf(stderr, "Test 40: batch add-tag...\n");
+    {
+        id rem40 = findReminder(store, @"__batch_test_1__", testListName);
+        if (!rem40) { fprintf(stderr, "  FAIL (not found)\n"); failed++; }
+        else {
+            NSString *rem40ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem40, sel_registerName("objectID")));
+            NSString *batchJSON = [NSString stringWithFormat:@"[{\"op\":\"add-tag\",\"id\":\"%@\",\"tag\":\"batch-test-tag\"}]", rem40ID];
+            __block int r = -1;
+            captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
+            if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+            else {
+                id updated = findReminder(store, @"__batch_test_1__", testListName);
+                NSSet *tags = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("hashtags"));
+                BOOL found = NO;
+                for (id tag in tags) {
+                    NSString *name = ((id (*)(id, SEL))objc_msgSend)(tag, sel_registerName("name"));
+                    if ([name isEqualToString:@"batch-test-tag"]) { found = YES; break; }
+                }
+                if (found) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (tag not found)\n"); failed++; }
+            }
+        }
+    }
+
+    // Test 41: batch remove-tag
+    fprintf(stderr, "Test 41: batch remove-tag...\n");
+    {
+        id rem41 = findReminder(store, @"__batch_test_1__", testListName);
+        if (!rem41) { fprintf(stderr, "  FAIL (not found)\n"); failed++; }
+        else {
+            NSString *rem41ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem41, sel_registerName("objectID")));
+            NSString *batchJSON = [NSString stringWithFormat:@"[{\"op\":\"remove-tag\",\"id\":\"%@\",\"tag\":\"batch-test-tag\"}]", rem41ID];
+            __block int r = -1;
+            captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
+            if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+            else {
+                id updated = findReminder(store, @"__batch_test_1__", testListName);
+                NSSet *tags = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("hashtags"));
+                BOOL found = NO;
+                for (id tag in tags) {
+                    NSString *name = ((id (*)(id, SEL))objc_msgSend)(tag, sel_registerName("name"));
+                    if ([name isEqualToString:@"batch-test-tag"]) { found = YES; break; }
+                }
+                if (!found) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (tag still exists)\n"); failed++; }
+            }
+        }
+    }
+
+    // Test 42: batch delete
+    fprintf(stderr, "Test 42: batch delete...\n");
+    {
+        id b1 = findReminder(store, @"__batch_test_1__", testListName);
+        id b2 = findReminder(store, @"__batch_test_2__", testListName);
+        if (!b1 || !b2) { fprintf(stderr, "  FAIL (not found)\n"); failed++; }
+        else {
+            NSString *b1ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(b1, sel_registerName("objectID")));
+            NSString *b2ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(b2, sel_registerName("objectID")));
+            NSString *batchJSON = [NSString stringWithFormat:@"[{\"op\":\"delete\",\"id\":\"%@\"},{\"op\":\"delete\",\"id\":\"%@\"}]", b1ID, b2ID];
+            __block int r = -1;
+            captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
+            if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+            else { fprintf(stderr, "  PASS\n"); passed++; }
+        }
+    }
+
     // Cleanup
-    // Test 38: cmdDelete child
-    fprintf(stderr, "Test 38: cmdDelete child...\n");
+    // Test 43: cmdDelete child
+    fprintf(stderr, "Test 43: cmdDelete child...\n");
     {
         id rem38 = findReminder(store, childTitle, testListName);
         NSString *rem38ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem38, sel_registerName("objectID")));
@@ -651,8 +782,8 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 39: cmdDelete parent
-    fprintf(stderr, "Test 39: cmdDelete parent...\n");
+    // Test 44: cmdDelete parent
+    fprintf(stderr, "Test 44: cmdDelete parent...\n");
     {
         id rem39 = findReminder(store, parentTitle, testListName);
         NSString *rem39ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem39, sel_registerName("objectID")));
@@ -660,8 +791,8 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 40: cmdDeleteList
-    fprintf(stderr, "Test 40: cmdDeleteList...\n");
+    // Test 45: cmdDeleteList
+    fprintf(stderr, "Test 45: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }

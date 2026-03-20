@@ -1015,11 +1015,12 @@ static int cmdBatch(id store) {
     if (![parsed isKindOfClass:[NSArray class]]) errorExit(@"Expected JSON array");
 
     NSArray *ops = (NSArray *)parsed;
-    NSSet *validOps = [NSSet setWithArray:@[@"add", @"complete", @"update", @"delete"]];
+    NSSet *validOps = [NSSet setWithArray:@[@"add", @"complete", @"update", @"delete",
+        @"add-tag", @"remove-tag"]];
     NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
-        @"notes", @"priority", @"flagged", @"completed",
-        @"due-date", @"start-date", @"url", @"remove-parent", @"remove-from-list",
-        @"parent-id", @"to-list"]];
+        @"notes", @"append-notes", @"priority", @"flagged", @"completed",
+        @"due-date", @"start-date", @"url", @"clear-url", @"remove-parent", @"remove-from-list",
+        @"parent-id", @"to-list", @"tag"]];
 
     // Validate all operations first
     for (NSUInteger i = 0; i < ops.count; i++) {

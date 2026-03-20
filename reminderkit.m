@@ -32,6 +32,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit rename-list --old-name <old-name> --new-name <new-name>\n");
     fprintf(stderr, "  reminderkit delete-list --name <name>\n");
     fprintf(stderr, "  reminderkit batch  (reads JSON array from stdin)\n");
+    fprintf(stderr, "    ops: add, update, complete, delete, add-tag, remove-tag\n");
     fprintf(stderr, "\n  Skill management:\n");
     fprintf(stderr, "  reminderkit install-skill [--claude] [--agents] [--force]\n");
     fprintf(stderr, "\n  Testing:\n");
