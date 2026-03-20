@@ -74,6 +74,7 @@ int main(int argc, const char *argv[]) {
                     [flag isEqualToString:@"help"] ||
                     [flag isEqualToString:@"clear-url"] ||
                     [flag isEqualToString:@"has-url"] ||
+                    [flag isEqualToString:@"all"] ||
                     [flag isEqualToString:@"claude"] ||
                     [flag isEqualToString:@"agents"] ||
                     [flag isEqualToString:@"force"]) {
