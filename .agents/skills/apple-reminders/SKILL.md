@@ -62,6 +62,45 @@ To clear a reminder's URL:
 reminderkit update --id <id> --clear-url
 ```
 
+## Assigning reminders on shared lists
+
+List who can be assigned on a shared list:
+
+```bash
+reminderkit list-sharees --name "Shared List"
+```
+
+Assign a reminder to a sharee:
+
+```bash
+reminderkit assign --id <reminder-id> --assignee-id <sharee-id>
+```
+
+Unassign a specific person or remove all assignments:
+
+```bash
+# Remove specific assignee
+reminderkit unassign --id <reminder-id> --assignee-id <sharee-id>
+
+# Remove all assignments
+reminderkit unassign --id <reminder-id>
+```
+
+The `assignments` field appears in reminder JSON output when assignments exist:
+
+```json
+{
+  "assignments": [
+    {
+      "assigneeID": "...",
+      "originatorID": "...",
+      "status": 0,
+      "assignedDate": "2026-03-20T13:00:00Z"
+    }
+  ]
+}
+```
+
 ## `reminderkit --help` (auto-executed)
 
 !`brew list --versions reminderkit-cli && reminderkit help 2>&1 || echo "reminderkit-cli is not installed"`
