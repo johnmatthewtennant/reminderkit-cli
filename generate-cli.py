@@ -65,6 +65,7 @@ REMINDER_READ_PROPS = {
     "completionDate":     ("completedAt",    "date"),
     "hashtags":           ("hashtags",       "set_hashtags"),
     "timeZone":           ("timeZone",       "string"),
+    "assignmentContext":  ("assignments",    "assignment_context"),
 }
 
 # Setters to expose on REMReminderChangeItem (write via update command)
@@ -387,6 +388,37 @@ def generate_reminder_to_dict():
             lines.append(f'                if (name) [tagNames addObject:name];')
             lines.append(f'            }}')
             lines.append(f'            dict[@"{json_key}"] = tagNames;')
+            lines.append(f'        }}')
+            lines.append(f'    }} @catch (NSException *e) {{}}')
+        elif type_hint == "assignment_context":
+            lines.append(f'    @try {{')
+            lines.append(f'        id assignCtx = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("assignmentContext"));')
+            lines.append(f'        if (assignCtx) {{')
+            lines.append(f'            NSSet *assignSet = ((id (*)(id, SEL))objc_msgSend)(assignCtx, sel_registerName("assignments"));')
+            lines.append(f'            if (assignSet && assignSet.count > 0) {{')
+            lines.append(f'                NSMutableArray *assignArr = [NSMutableArray array];')
+            lines.append(f'                for (id a in assignSet) {{')
+            lines.append(f'                    NSMutableDictionary *aDict = [NSMutableDictionary dictionary];')
+            lines.append(f'                    @try {{')
+            lines.append(f'                        id assigneeID = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("assigneeID"));')
+            lines.append(f'                        if (assigneeID) aDict[@"assigneeID"] = objectIDToString(assigneeID);')
+            lines.append(f'                    }} @catch (NSException *e2) {{}}')
+            lines.append(f'                    @try {{')
+            lines.append(f'                        id originatorID = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("originatorID"));')
+            lines.append(f'                        if (originatorID) aDict[@"originatorID"] = objectIDToString(originatorID);')
+            lines.append(f'                    }} @catch (NSException *e2) {{}}')
+            lines.append(f'                    @try {{')
+            lines.append(f'                        NSInteger status = ((NSInteger (*)(id, SEL))objc_msgSend)(a, sel_registerName("status"));')
+            lines.append(f'                        aDict[@"status"] = @(status);')
+            lines.append(f'                    }} @catch (NSException *e2) {{}}')
+            lines.append(f'                    @try {{')
+            lines.append(f'                        NSDate *assignedDate = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("assignedDate"));')
+            lines.append(f'                        if (assignedDate) aDict[@"assignedDate"] = dateToISO(assignedDate);')
+            lines.append(f'                    }} @catch (NSException *e2) {{}}')
+            lines.append(f'                    if (aDict.count > 0) [assignArr addObject:aDict];')
+            lines.append(f'                }}')
+            lines.append(f'                dict[@"{json_key}"] = assignArr;')
+            lines.append(f'            }}')
             lines.append(f'        }}')
             lines.append(f'    }} @catch (NSException *e) {{}}')
         lines.append('')
@@ -1015,11 +1047,12 @@ static int cmdBatch(id store) {
     if (![parsed isKindOfClass:[NSArray class]]) errorExit(@"Expected JSON array");
 
     NSArray *ops = (NSArray *)parsed;
-    NSSet *validOps = [NSSet setWithArray:@[@"add", @"complete", @"update", @"delete"]];
+    NSSet *validOps = [NSSet setWithArray:@[@"add", @"complete", @"update", @"delete",
+        @"add-tag", @"remove-tag"]];
     NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
-        @"notes", @"priority", @"flagged", @"completed",
-        @"due-date", @"start-date", @"url", @"remove-parent", @"remove-from-list",
-        @"parent-id", @"to-list"]];
+        @"notes", @"append-notes", @"priority", @"flagged", @"completed",
+        @"due-date", @"start-date", @"url", @"clear-url", @"remove-parent", @"remove-from-list",
+        @"parent-id", @"to-list", @"tag"]];
 
     // Validate all operations first
     for (NSUInteger i = 0; i < ops.count; i++) {

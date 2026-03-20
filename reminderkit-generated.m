@@ -337,6 +337,37 @@ static NSDictionary *reminderToDict(id rem) {
     } @catch (NSException *e) {}
 
     @try {
+        id assignCtx = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("assignmentContext"));
+        if (assignCtx) {
+            NSSet *assignSet = ((id (*)(id, SEL))objc_msgSend)(assignCtx, sel_registerName("assignments"));
+            if (assignSet && assignSet.count > 0) {
+                NSMutableArray *assignArr = [NSMutableArray array];
+                for (id a in assignSet) {
+                    NSMutableDictionary *aDict = [NSMutableDictionary dictionary];
+                    @try {
+                        id assigneeID = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("assigneeID"));
+                        if (assigneeID) aDict[@"assigneeID"] = objectIDToString(assigneeID);
+                    } @catch (NSException *e2) {}
+                    @try {
+                        id originatorID = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("originatorID"));
+                        if (originatorID) aDict[@"originatorID"] = objectIDToString(originatorID);
+                    } @catch (NSException *e2) {}
+                    @try {
+                        NSInteger status = ((NSInteger (*)(id, SEL))objc_msgSend)(a, sel_registerName("status"));
+                        aDict[@"status"] = @(status);
+                    } @catch (NSException *e2) {}
+                    @try {
+                        NSDate *assignedDate = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("assignedDate"));
+                        if (assignedDate) aDict[@"assignedDate"] = dateToISO(assignedDate);
+                    } @catch (NSException *e2) {}
+                    if (aDict.count > 0) [assignArr addObject:aDict];
+                }
+                dict[@"assignments"] = assignArr;
+            }
+        }
+    } @catch (NSException *e) {}
+
+    @try {
         id attCtx = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("attachmentContext"));
         if (attCtx) {
             NSArray *urlAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("urlAttachments"));
