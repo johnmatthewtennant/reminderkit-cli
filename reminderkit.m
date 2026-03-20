@@ -23,7 +23,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit get --id <id>\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
-    fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
+    fprintf(stderr, "  reminderkit update --id <id> [--title <value>] [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
     fprintf(stderr, "  reminderkit complete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\n");
