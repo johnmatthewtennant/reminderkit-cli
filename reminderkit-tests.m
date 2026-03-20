@@ -714,9 +714,15 @@ static int cmdTest(id store) {
             NSString *rem40ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem40, sel_registerName("objectID")));
             NSString *batchJSON = [NSString stringWithFormat:@"[{\"op\":\"add-tag\",\"id\":\"%@\",\"tag\":\"batch-test-tag\"}]", rem40ID];
             __block int r = -1;
-            captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
+            NSData *out = captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
             if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
             else {
+                // Verify output shape
+                id json = parseJSONFromData(out);
+                BOOL outputOK = [json isKindOfClass:[NSArray class]] && [(NSArray *)json count] == 1
+                    && [((NSArray *)json)[0][@"status"] isEqualToString:@"ok"]
+                    && [((NSArray *)json)[0][@"op"] isEqualToString:@"add-tag"];
+                // Verify tag on reminder
                 id updated = findReminder(store, @"__batch_test_1__", testListName);
                 NSSet *tags = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("hashtags"));
                 BOOL found = NO;
@@ -724,8 +730,8 @@ static int cmdTest(id store) {
                     NSString *name = ((id (*)(id, SEL))objc_msgSend)(tag, sel_registerName("name"));
                     if ([name isEqualToString:@"batch-test-tag"]) { found = YES; break; }
                 }
-                if (found) { fprintf(stderr, "  PASS\n"); passed++; }
-                else { fprintf(stderr, "  FAIL (tag not found)\n"); failed++; }
+                if (found && outputOK) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (tag found=%d, outputOK=%d)\n", found, outputOK); failed++; }
             }
         }
     }
@@ -768,7 +774,13 @@ static int cmdTest(id store) {
             __block int r = -1;
             captureStdoutWithStdin(batchJSON, ^{ r = cmdBatch(store); });
             if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
-            else { fprintf(stderr, "  PASS\n"); passed++; }
+            else {
+                // Verify reminders are actually deleted
+                id gone1 = findReminder(store, @"__batch_test_1__", testListName);
+                id gone2 = findReminder(store, @"__batch_test_2__", testListName);
+                if (!gone1 && !gone2) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (reminders still exist after delete)\n"); failed++; }
+            }
         }
     }
 
