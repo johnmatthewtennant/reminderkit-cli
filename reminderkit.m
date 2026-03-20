@@ -17,10 +17,9 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit lists\n");
     fprintf(stderr, "  reminderkit list --name <name> [--include-completed] [--has-url] [--tag <tags>] [--exclude-tag <tags>]\n");
     fprintf(stderr, "  reminderkit list --all [--include-completed] [--has-url] [--tag <tags>] [--exclude-tag <tags>]\n");
-    fprintf(stderr, "  reminderkit search --title <title> [--url <url>] [--list <name>]\n");
-    fprintf(stderr, "  reminderkit search --url <url> [--list <name>]\n");
+    fprintf(stderr, "  reminderkit search [--title <title>] [--url <url>] [--list <name>] [--tag <tags>] [--exclude-tag <tags>] [--has-url]\n");
     fprintf(stderr, "  reminderkit search --id <id>\n");
-    fprintf(stderr, "  reminderkit get --title <title> [--url <url>] [--list <name>]  (alias for search)\n");
+    fprintf(stderr, "  reminderkit get [--title <title>] [--url <url>] [--list <name>] [--tag <tags>] [--exclude-tag <tags>] [--has-url]  (alias for search)\n");
     fprintf(stderr, "  reminderkit get --id <id>\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
@@ -128,8 +127,8 @@ int main(int argc, const char *argv[]) {
             if (opts[@"id"] && [opts[@"id"] length] > 0) {
                 return cmdGetByID(store, opts[@"id"]);
             }
-            if (!kwTitle && !opts[@"url"]) { fprintf(stderr, "Error: --title, --url, or --id required\n"); usage(); return 1; }
-            return cmdGet(store, kwTitle, listName, opts[@"url"]);
+            if (!kwTitle && !opts[@"url"] && !kwTag && !opts[@"exclude-tag"] && !hasURL) { fprintf(stderr, "Error: --title, --url, --id, --tag, --exclude-tag, or --has-url required\n"); usage(); return 1; }
+            return cmdGet(store, kwTitle, listName, opts[@"url"], kwTag, opts[@"exclude-tag"], hasURL);
 
         } else if ([command isEqualToString:@"subtasks"]) {
             if (!kwTitle) { fprintf(stderr, "Error: --title required\n"); usage(); return 1; }

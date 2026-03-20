@@ -564,7 +564,7 @@ static int cmdGetByID(id store, NSString *remID) {
     return 0;
 }
 
-static int cmdGet(id store, NSString *title, NSString *listName, NSString *urlFilter) {
+static int cmdGet(id store, NSString *title, NSString *listName, NSString *urlFilter, NSString *tagFilter, NSString *excludeTagFilter, BOOL filterHasURL) {
     NSArray *matches;
     if (urlFilter) {
         matches = findRemindersByURL(store, urlFilter, listName);
@@ -583,12 +583,53 @@ static int cmdGet(id store, NSString *title, NSString *listName, NSString *urlFi
             }
             matches = filtered;
         }
-    } else {
+    } else if (title) {
         matches = findReminders(store, title, listName);
+    } else {
+        // No title or URL - fetch all reminders across lists
+        NSArray *lists;
+        if (listName) {
+            id list = findList(store, listName);
+            if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
+            lists = @[list];
+        } else {
+            lists = fetchLists(store);
+        }
+        NSMutableArray *all = [NSMutableArray array];
+        for (id list in lists) {
+            NSArray *rems = fetchReminders(store, list, NO);
+            [all addObjectsFromArray:rems];
+        }
+        matches = all;
     }
+
+    // Apply tag and has-url filters
+    NSSet *includeTags = parseCommaSeparatedTags(tagFilter);
+    NSSet *excludeTags = parseCommaSeparatedTags(excludeTagFilter);
+    if (filterHasURL || includeTags || excludeTags) {
+        NSMutableArray *filtered = [NSMutableArray array];
+        for (id rem in matches) {
+            if (filterHasURL) {
+                @try {
+                    id attCtx = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("attachmentContext"));
+                    if (!attCtx) continue;
+                    NSArray *urlAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("urlAttachments"));
+                    if (!urlAtts || urlAtts.count == 0) continue;
+                } @catch (NSException *e) { continue; }
+            }
+            if (includeTags || excludeTags) {
+                NSSet *remTags = getTagNames(rem);
+                if (includeTags && ![includeTags intersectsSet:remTags]) continue;
+                if (excludeTags && [excludeTags intersectsSet:remTags]) continue;
+            }
+            [filtered addObject:rem];
+        }
+        matches = filtered;
+    }
+
     if (matches.count == 0) {
-        NSString *desc = urlFilter ? urlFilter : title;
-        errorExit([NSString stringWithFormat:@"Reminder not found: %@", desc]);
+        NSString *desc = urlFilter ? urlFilter : (title ? title : @"(all)");
+        errorExit([NSString stringWithFormat:@"No reminders found matching: %@", desc]);
     }
 
     NSMutableArray *resultArray = [NSMutableArray array];
