@@ -122,6 +122,13 @@ static id findList(id store, NSString *name) {
         NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
         if ([listName isEqualToString:name]) return list;
     }
+    // Normalized fallback: retry with curly quotes normalized to straight quotes
+    NSString *normalizedName = normalizeQuotes(name);
+    for (id list in lists) {
+        id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+        NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
+        if ([normalizeQuotes(listName) isEqualToString:normalizedName]) return list;
+    }
     return nil;
 }
 
@@ -155,6 +162,15 @@ static id findReminder(id store, NSString *title, NSString *listName) {
         for (id rem in rems) {
             NSString *t = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("titleAsString"));
             if ([t isEqualToString:title]) return rem;
+        }
+    }
+    // Normalized fallback: retry with curly quotes normalized to straight quotes
+    NSString *normalizedTitle = normalizeQuotes(title);
+    for (id list in lists) {
+        NSArray *rems = fetchReminders(store, list, YES);
+        for (id rem in rems) {
+            NSString *t = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("titleAsString"));
+            if ([normalizeQuotes(t) isEqualToString:normalizedTitle]) return rem;
         }
     }
     return nil;
