@@ -628,7 +628,12 @@ static int cmdGet(id store, NSString *title, NSString *listName, NSString *urlFi
     }
 
     if (matches.count == 0) {
-        NSString *desc = urlFilter ? urlFilter : (title ? title : @"(all)");
+        // Filter-only queries (no title/url) return empty array instead of error
+        if (!title && !urlFilter) {
+            printJSON(@[]);
+            return 0;
+        }
+        NSString *desc = urlFilter ? urlFilter : title;
         errorExit([NSString stringWithFormat:@"No reminders found matching: %@", desc]);
     }
 
