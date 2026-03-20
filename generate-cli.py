@@ -498,12 +498,55 @@ static int cmdLists(id store) {
     return 0;
 }
 
-static int cmdList(id store, NSString *listName, BOOL includeCompleted) {
+static NSSet *parseCommaSeparatedTags(NSString *tagStr) {
+    if (!tagStr || tagStr.length == 0) return nil;
+    NSArray *parts = [tagStr componentsSeparatedByString:@","];
+    NSMutableSet *tags = [NSMutableSet set];
+    for (NSString *part in parts) {
+        NSString *trimmed = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (trimmed.length > 0) [tags addObject:trimmed];
+    }
+    return tags.count > 0 ? tags : nil;
+}
+
+static NSSet *getTagNames(id rem) {
+    @try {
+        NSSet *tags = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("hashtags"));
+        if (!tags || tags.count == 0) return [NSSet set];
+        NSMutableSet *names = [NSMutableSet set];
+        for (id tag in tags) {
+            NSString *name = ((id (*)(id, SEL))objc_msgSend)(tag, sel_registerName("name"));
+            if (name) [names addObject:name];
+        }
+        return names;
+    } @catch (NSException *e) {
+        return [NSSet set];
+    }
+}
+
+static int cmdList(id store, NSString *listName, BOOL includeCompleted, NSString *tagFilter, NSString *excludeTagFilter, BOOL hasURL) {
     id list = findList(store, listName);
     if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
     NSArray *rems = fetchReminders(store, list, includeCompleted);
+
+    NSSet *includeTags = parseCommaSeparatedTags(tagFilter);
+    NSSet *excludeTags = parseCommaSeparatedTags(excludeTagFilter);
+
     NSMutableArray *result = [NSMutableArray array];
     for (id rem in rems) {
+        if (hasURL) {
+            @try {
+                id attCtx = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("attachmentContext"));
+                if (!attCtx) continue;
+                NSArray *urlAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("urlAttachments"));
+                if (!urlAtts || urlAtts.count == 0) continue;
+            } @catch (NSException *e) { continue; }
+        }
+        if (includeTags || excludeTags) {
+            NSSet *remTags = getTagNames(rem);
+            if (includeTags && ![includeTags intersectsSet:remTags]) continue;
+            if (excludeTags && [excludeTags intersectsSet:remTags]) continue;
+        }
         [result addObject:reminderToDict(rem)];
     }
     printJSON(result);
@@ -1576,7 +1619,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 13: cmdList JSON shape...\\n");
     {
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO); });
+        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO, nil, nil); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -2095,7 +2138,7 @@ def generate_usage():
 static void usage(void) {
     fprintf(stderr, "Usage:\\n");
     fprintf(stderr, "  reminderkit lists\\n");
-    fprintf(stderr, "  reminderkit list --name <name> [--include-completed]\\n");
+    fprintf(stderr, "  reminderkit list --name <name> [--include-completed] [--tag <tags>] [--exclude-tag <tags>]\\n");
     fprintf(stderr, "  reminderkit search --title <title> [--url <url>] [--list <name>]\\n");
     fprintf(stderr, "  reminderkit search --id <id>\\n");
     fprintf(stderr, "  reminderkit get --title <title> [--url <url>] [--list <name>]  (alias for search)\\n");
@@ -2190,7 +2233,7 @@ int main(int argc, const char *argv[]) {
 
         } else if ([command isEqualToString:@"list"]) {
             if (!kwName) { fprintf(stderr, "Error: --name required\\n"); usage(); return 1; }
-            return cmdList(store, kwName, includeCompleted);
+            return cmdList(store, kwName, includeCompleted, opts[@"tag"], opts[@"exclude-tag"]);
 
         } else if ([command isEqualToString:@"search"] || [command isEqualToString:@"get"]) {
             if (opts[@"id"] && [opts[@"id"] length] > 0) {

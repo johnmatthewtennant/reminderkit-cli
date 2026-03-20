@@ -436,12 +436,47 @@ static int cmdLists(id store) {
     return 0;
 }
 
-static int cmdList(id store, NSString *listName, BOOL includeCompleted) {
+static NSSet *parseCommaSeparatedTags(NSString *tagStr) {
+    if (!tagStr || tagStr.length == 0) return nil;
+    NSArray *parts = [tagStr componentsSeparatedByString:@","];
+    NSMutableSet *tags = [NSMutableSet set];
+    for (NSString *part in parts) {
+        NSString *trimmed = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (trimmed.length > 0) [tags addObject:trimmed];
+    }
+    return tags.count > 0 ? tags : nil;
+}
+
+static NSSet *getTagNames(id rem) {
+    @try {
+        NSSet *tags = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("hashtags"));
+        if (!tags || tags.count == 0) return [NSSet set];
+        NSMutableSet *names = [NSMutableSet set];
+        for (id tag in tags) {
+            NSString *name = ((id (*)(id, SEL))objc_msgSend)(tag, sel_registerName("name"));
+            if (name) [names addObject:name];
+        }
+        return names;
+    } @catch (NSException *e) {
+        return [NSSet set];
+    }
+}
+
+static int cmdList(id store, NSString *listName, BOOL includeCompleted, NSString *tagFilter, NSString *excludeTagFilter) {
     id list = findList(store, listName);
     if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
     NSArray *rems = fetchReminders(store, list, includeCompleted);
+
+    NSSet *includeTags = parseCommaSeparatedTags(tagFilter);
+    NSSet *excludeTags = parseCommaSeparatedTags(excludeTagFilter);
+
     NSMutableArray *result = [NSMutableArray array];
     for (id rem in rems) {
+        if (includeTags || excludeTags) {
+            NSSet *remTags = getTagNames(rem);
+            if (includeTags && ![includeTags intersectsSet:remTags]) continue;
+            if (excludeTags && [excludeTags intersectsSet:remTags]) continue;
+        }
         [result addObject:reminderToDict(rem)];
     }
     printJSON(result);
