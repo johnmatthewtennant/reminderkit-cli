@@ -24,8 +24,8 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
     fprintf(stderr, "  reminderkit update --id <id> [--title <value>] [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
-    fprintf(stderr, "  reminderkit complete --id <id> [--list <name>]\n");
-    fprintf(stderr, "  reminderkit delete --id <id> [--list <name>]\n");
+    fprintf(stderr, "  reminderkit complete --id <id>\n");
+    fprintf(stderr, "  reminderkit delete --id <id>\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\n");
     fprintf(stderr, "  reminderkit remove-tag --id <id> --tag <tag-name>\n");
     fprintf(stderr, "  reminderkit assign --id <id> --assignee-id <sharee-id>\n");
@@ -145,11 +145,11 @@ int main(int argc, const char *argv[]) {
 
         } else if ([command isEqualToString:@"complete"]) {
             if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
-            return cmdComplete(store, listName, opts[@"id"]);
+            return cmdComplete(store, opts[@"id"]);
 
         } else if ([command isEqualToString:@"delete"]) {
             if (!opts[@"id"] || [opts[@"id"] length] == 0) { fprintf(stderr, "Error: --id required\n"); usage(); return 1; }
-            return cmdDelete(store, listName, opts[@"id"]);
+            return cmdDelete(store, opts[@"id"]);
 
         } else if ([command isEqualToString:@"batch"]) {
             return cmdBatch(store);

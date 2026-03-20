@@ -249,7 +249,7 @@ static int cmdBatch(id store) {
     }
 
     NSError *error = nil;
-    BOOL saved = ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
