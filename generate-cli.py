@@ -565,6 +565,39 @@ static int cmdList(id store, NSString *listName, BOOL includeCompleted, NSString
     return 0;
 }
 
+static int cmdListAll(id store, BOOL includeCompleted, NSString *tagFilter, NSString *excludeTagFilter, BOOL hasURL) {
+    NSArray *lists = fetchLists(store);
+    NSSet *includeTags = parseCommaSeparatedTags(tagFilter);
+    NSSet *excludeTags = parseCommaSeparatedTags(excludeTagFilter);
+
+    NSMutableArray *result = [NSMutableArray array];
+    for (id list in lists) {
+        id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+        NSString *name = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
+        NSArray *rems = fetchReminders(store, list, includeCompleted);
+        for (id rem in rems) {
+            if (hasURL) {
+                @try {
+                    id attCtx = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("attachmentContext"));
+                    if (!attCtx) continue;
+                    NSArray *urlAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("urlAttachments"));
+                    if (!urlAtts || urlAtts.count == 0) continue;
+                } @catch (NSException *e) { continue; }
+            }
+            if (includeTags || excludeTags) {
+                NSSet *remTags = getTagNames(rem);
+                if (includeTags && ![includeTags intersectsSet:remTags]) continue;
+                if (excludeTags && [excludeTags intersectsSet:remTags]) continue;
+            }
+            NSMutableDictionary *dict = [reminderToDict(rem) mutableCopy];
+            dict[@"listName"] = name ?: @"";
+            [result addObject:dict];
+        }
+    }
+    printJSON(result);
+    return 0;
+}
+
 static int cmdGetByID(id store, NSString *remID) {
     id rem = findReminderByID(store, remID);
     if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", remID]);
