@@ -813,14 +813,26 @@ static int cmdTest(id store) {
                 NSUInteger countExclude = [jsonExclude count];
                 NSUInteger countAll = [jsonAll count];
                 // Include should find at least 1 (the tagged one)
-                // Exclude should find fewer than all
-                // Include + exclude should equal all
-                if (countInclude >= 1 && countExclude < countAll && countInclude + countExclude == countAll) {
+                // Verify included items all have the tag
+                BOOL allIncludedHaveTag = YES;
+                for (NSDictionary *item in (NSArray *)jsonInclude) {
+                    NSArray *tags = item[@"hashtags"];
+                    if (!tags || ![tags containsObject:@"filter-test-tag"]) { allIncludedHaveTag = NO; break; }
+                }
+                // Verify excluded items do NOT have the tag
+                BOOL noExcludedHaveTag = YES;
+                for (NSDictionary *item in (NSArray *)jsonExclude) {
+                    NSArray *tags = item[@"hashtags"];
+                    if (tags && [tags containsObject:@"filter-test-tag"]) { noExcludedHaveTag = NO; break; }
+                }
+                if (countInclude >= 1 && countExclude < countAll && countInclude + countExclude == countAll
+                    && allIncludedHaveTag && noExcludedHaveTag) {
                     fprintf(stderr, "  PASS (include=%lu, exclude=%lu, all=%lu)\n",
                         (unsigned long)countInclude, (unsigned long)countExclude, (unsigned long)countAll); passed++;
                 } else {
-                    fprintf(stderr, "  FAIL (include=%lu, exclude=%lu, all=%lu)\n",
-                        (unsigned long)countInclude, (unsigned long)countExclude, (unsigned long)countAll); failed++;
+                    fprintf(stderr, "  FAIL (include=%lu, exclude=%lu, all=%lu, tagsOK=%d/%d)\n",
+                        (unsigned long)countInclude, (unsigned long)countExclude, (unsigned long)countAll,
+                        allIncludedHaveTag, noExcludedHaveTag); failed++;
                 }
             }
             // Clean up tag
@@ -847,10 +859,15 @@ static int cmdTest(id store) {
                 id jsonFiltered = parseJSONFromData(outFiltered);
                 NSUInteger countAll = [jsonAll count];
                 NSUInteger countFiltered = [jsonFiltered count];
-                if (countFiltered < countAll && countFiltered >= 1 && jsonArrayFind(jsonFiltered, @"title", parentTitle)) {
-                    fprintf(stderr, "  PASS (all=%lu, filtered=%lu)\n", (unsigned long)countAll, (unsigned long)countFiltered); passed++;
+                // Verify all filtered items have a URL
+                BOOL allHaveURL = YES;
+                for (NSDictionary *item in (NSArray *)jsonFiltered) {
+                    if (!item[@"url"] || [item[@"url"] length] == 0) { allHaveURL = NO; break; }
+                }
+                if (countFiltered < countAll && countFiltered >= 1 && allHaveURL && jsonArrayFind(jsonFiltered, @"title", parentTitle)) {
+                    fprintf(stderr, "  PASS (all=%lu, filtered=%lu, allHaveURL=YES)\n", (unsigned long)countAll, (unsigned long)countFiltered); passed++;
                 } else {
-                    fprintf(stderr, "  FAIL (all=%lu, filtered=%lu)\n", (unsigned long)countAll, (unsigned long)countFiltered); failed++;
+                    fprintf(stderr, "  FAIL (all=%lu, filtered=%lu, allHaveURL=%d)\n", (unsigned long)countAll, (unsigned long)countFiltered, allHaveURL); failed++;
                 }
             }
         }
