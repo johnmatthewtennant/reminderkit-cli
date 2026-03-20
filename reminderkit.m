@@ -128,7 +128,7 @@ int main(int argc, const char *argv[]) {
             if (opts[@"id"] && [opts[@"id"] length] > 0) {
                 return cmdGetByID(store, opts[@"id"]);
             }
-            if (!kwTitle && !opts[@"url"] && !kwTag && !opts[@"exclude-tag"] && !hasURL) { fprintf(stderr, "Error: --title, --url, --id, --tag, --exclude-tag, or --has-url required\n"); usage(); return 1; }
+            if (!kwTitle && !opts[@"url"] && !kwTag && !opts[@"exclude-tag"] && !hasURL && !listName) { fprintf(stderr, "Error: --title, --url, --id, --tag, --exclude-tag, --has-url, or --list required\n"); usage(); return 1; }
             return cmdGet(store, kwTitle, listName, opts[@"url"], kwTag, opts[@"exclude-tag"], hasURL);
 
         } else if ([command isEqualToString:@"subtasks"]) {

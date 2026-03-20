@@ -867,7 +867,7 @@ static int cmdTest(id store) {
         if (r45 != 0) { fprintf(stderr, "  FAIL (could not set URL)\n"); failed++; }
         else {
             __block int r = -1;
-            NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil); });
+            NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil, nil, nil, NO); });
             if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
             else {
                 id json = parseJSONFromData(out);
@@ -891,7 +891,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 46: no linkedNoteId for non-applenotes URLs...\n");
     {
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil); });
+        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil, nil, nil, NO); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -902,6 +902,85 @@ static int cmdTest(id store) {
                     [json[@"linkedNoteId"] UTF8String]); failed++;
             }
         }
+    }
+
+    // Test: cmdGet with --tag filter
+    fprintf(stderr, "Test: cmdGet --tag filter...\n");
+    {
+        id remT = findReminder(store, parentTitle, testListName);
+        NSString *remTID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(remT, sel_registerName("objectID")));
+        cmdAddTag(store, remTID, @"test-search-tag");
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, @"test-search-tag", nil, NO); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if ([json isKindOfClass:[NSDictionary class]] || ([json isKindOfClass:[NSArray class]] && [(NSArray *)json count] > 0)) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else {
+                fprintf(stderr, "  FAIL (expected dict or non-empty array)\n"); failed++;
+            }
+        }
+        cmdRemoveTag(store, remTID, @"test-search-tag");
+    }
+
+    // Test: cmdGet with --exclude-tag filter
+    fprintf(stderr, "Test: cmdGet --exclude-tag filter...\n");
+    {
+        id remT = findReminder(store, parentTitle, testListName);
+        NSString *remTID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(remT, sel_registerName("objectID")));
+        cmdAddTag(store, remTID, @"test-exclude-tag");
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, nil, @"test-exclude-tag", NO); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (expected array)\n"); failed++;
+            } else {
+                BOOL foundExcluded = NO;
+                for (NSDictionary *d in (NSArray *)json) {
+                    NSArray *tags = d[@"hashtags"];
+                    if (tags && [tags containsObject:@"test-exclude-tag"]) foundExcluded = YES;
+                }
+                if (foundExcluded) { fprintf(stderr, "  FAIL (excluded tag still present)\n"); failed++; }
+                else { fprintf(stderr, "  PASS\n"); passed++; }
+            }
+        }
+        cmdRemoveTag(store, remTID, @"test-exclude-tag");
+    }
+
+    // Test: cmdGet with --list only (no title/url/tag)
+    fprintf(stderr, "Test: cmdGet --list only...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, nil, nil, NO); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if ([json isKindOfClass:[NSDictionary class]] || ([json isKindOfClass:[NSArray class]] && [(NSArray *)json count] > 0)) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else {
+                fprintf(stderr, "  FAIL (expected dict or non-empty array)\n"); failed++;
+            }
+        }
+    }
+
+    // Test: cmdGet with --title + --tag combined
+    fprintf(stderr, "Test: cmdGet --title + --tag combined...\n");
+    {
+        id remT = findReminder(store, parentTitle, testListName);
+        NSString *remTID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(remT, sel_registerName("objectID")));
+        cmdAddTag(store, remTID, @"test-combo-tag");
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil, @"test-combo-tag", nil, NO); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (!json) { fprintf(stderr, "  FAIL (no JSON)\n"); failed++; }
+            else { fprintf(stderr, "  PASS\n"); passed++; }
+        }
+        cmdRemoveTag(store, remTID, @"test-combo-tag");
     }
 
     // Cleanup
