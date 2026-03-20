@@ -16,8 +16,11 @@ static void usage(void) {
     fprintf(stderr, "Usage:\n");
     fprintf(stderr, "  reminderkit lists\n");
     fprintf(stderr, "  reminderkit list --name <name> [--include-completed]\n");
-    fprintf(stderr, "  reminderkit search --title <title> [--list <name>]\n");
-    fprintf(stderr, "  reminderkit get --title <title> [--list <name>]  (alias for search)\n");
+    fprintf(stderr, "  reminderkit search --title <title> [--url <url>] [--list <name>]\n");
+    fprintf(stderr, "  reminderkit search --url <url> [--list <name>]\n");
+    fprintf(stderr, "  reminderkit search --id <id>\n");
+    fprintf(stderr, "  reminderkit get --title <title> [--url <url>] [--list <name>]  (alias for search)\n");
+    fprintf(stderr, "  reminderkit get --id <id>\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
     fprintf(stderr, "  reminderkit update --id <id> [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
@@ -114,8 +117,11 @@ int main(int argc, const char *argv[]) {
             return cmdList(store, kwName, includeCompleted);
 
         } else if ([command isEqualToString:@"search"] || [command isEqualToString:@"get"]) {
-            if (!kwTitle) { fprintf(stderr, "Error: --title required\n"); usage(); return 1; }
-            return cmdGet(store, kwTitle, listName);
+            if (opts[@"id"] && [opts[@"id"] length] > 0) {
+                return cmdGetByID(store, opts[@"id"]);
+            }
+            if (!kwTitle && !opts[@"url"]) { fprintf(stderr, "Error: --title, --url, or --id required\n"); usage(); return 1; }
+            return cmdGet(store, kwTitle, listName, opts[@"url"]);
 
         } else if ([command isEqualToString:@"subtasks"]) {
             if (!kwTitle) { fprintf(stderr, "Error: --title required\n"); usage(); return 1; }

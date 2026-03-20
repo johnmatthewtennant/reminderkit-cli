@@ -210,7 +210,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 4: cmdGet JSON shape...\n");
     {
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName); });
+        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
