@@ -473,13 +473,14 @@ static NSSet *getTagNames(id rem) {
     }
 }
 
-static int cmdList(id store, NSString *listName, BOOL includeCompleted, NSString *tagFilter, NSString *excludeTagFilter, BOOL hasURL) {
+static int cmdList(id store, NSString *listName, BOOL includeCompleted, NSString *tagFilter, NSString *excludeTagFilter, BOOL hasURL, NSString *notesContains) {
     id list = findList(store, listName);
     if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
     NSArray *rems = fetchReminders(store, list, includeCompleted);
 
     NSSet *includeTags = parseCommaSeparatedTags(tagFilter);
     NSSet *excludeTags = parseCommaSeparatedTags(excludeTagFilter);
+    NSString *lowerNotesFilter = notesContains ? [notesContains lowercaseString] : nil;
 
     NSMutableArray *result = [NSMutableArray array];
     for (id rem in rems) {
@@ -496,16 +497,23 @@ static int cmdList(id store, NSString *listName, BOOL includeCompleted, NSString
             if (includeTags && ![includeTags intersectsSet:remTags]) continue;
             if (excludeTags && [excludeTags intersectsSet:remTags]) continue;
         }
+        if (lowerNotesFilter) {
+            @try {
+                NSString *notes = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("notesAsString"));
+                if (!notes || [[notes lowercaseString] rangeOfString:lowerNotesFilter].location == NSNotFound) continue;
+            } @catch (NSException *e) { continue; }
+        }
         [result addObject:reminderToDict(rem)];
     }
     printJSON(result);
     return 0;
 }
 
-static int cmdListAll(id store, BOOL includeCompleted, NSString *tagFilter, NSString *excludeTagFilter, BOOL hasURL) {
+static int cmdListAll(id store, BOOL includeCompleted, NSString *tagFilter, NSString *excludeTagFilter, BOOL hasURL, NSString *notesContains) {
     NSArray *lists = fetchLists(store);
     NSSet *includeTags = parseCommaSeparatedTags(tagFilter);
     NSSet *excludeTags = parseCommaSeparatedTags(excludeTagFilter);
+    NSString *lowerNotesFilter = notesContains ? [notesContains lowercaseString] : nil;
 
     NSMutableArray *result = [NSMutableArray array];
     for (id list in lists) {
@@ -525,6 +533,12 @@ static int cmdListAll(id store, BOOL includeCompleted, NSString *tagFilter, NSSt
                 NSSet *remTags = getTagNames(rem);
                 if (includeTags && ![includeTags intersectsSet:remTags]) continue;
                 if (excludeTags && [excludeTags intersectsSet:remTags]) continue;
+            }
+            if (lowerNotesFilter) {
+                @try {
+                    NSString *notes = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("notesAsString"));
+                    if (!notes || [[notes lowercaseString] rangeOfString:lowerNotesFilter].location == NSNotFound) continue;
+                } @catch (NSException *e) { continue; }
             }
             NSMutableDictionary *dict = [reminderToDict(rem) mutableCopy];
             dict[@"listName"] = name ?: @"";
@@ -563,7 +577,7 @@ static int cmdGetByID(id store, NSString *remID) {
     return 0;
 }
 
-static int cmdGet(id store, NSString *title, NSString *listName, NSString *urlFilter, NSString *tagFilter, NSString *excludeTagFilter, BOOL filterHasURL) {
+static int cmdGet(id store, NSString *title, NSString *listName, NSString *urlFilter, NSString *tagFilter, NSString *excludeTagFilter, BOOL filterHasURL, NSString *notesContains) {
     NSArray *matches;
     if (urlFilter) {
         matches = findRemindersByURL(store, urlFilter, listName);
@@ -602,10 +616,11 @@ static int cmdGet(id store, NSString *title, NSString *listName, NSString *urlFi
         matches = all;
     }
 
-    // Apply tag and has-url filters
+    // Apply tag, has-url, and notes-contains filters
     NSSet *includeTags = parseCommaSeparatedTags(tagFilter);
     NSSet *excludeTags = parseCommaSeparatedTags(excludeTagFilter);
-    if (filterHasURL || includeTags || excludeTags) {
+    NSString *lowerNotesFilter = notesContains ? [notesContains lowercaseString] : nil;
+    if (filterHasURL || includeTags || excludeTags || lowerNotesFilter) {
         NSMutableArray *filtered = [NSMutableArray array];
         for (id rem in matches) {
             if (filterHasURL) {
@@ -620,6 +635,12 @@ static int cmdGet(id store, NSString *title, NSString *listName, NSString *urlFi
                 NSSet *remTags = getTagNames(rem);
                 if (includeTags && ![includeTags intersectsSet:remTags]) continue;
                 if (excludeTags && [excludeTags intersectsSet:remTags]) continue;
+            }
+            if (lowerNotesFilter) {
+                @try {
+                    NSString *notes = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("notesAsString"));
+                    if (!notes || [[notes lowercaseString] rangeOfString:lowerNotesFilter].location == NSNotFound) continue;
+                } @catch (NSException *e) { continue; }
             }
             [filtered addObject:rem];
         }

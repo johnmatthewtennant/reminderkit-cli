@@ -36,6 +36,8 @@ Command-line interface for Apple Reminders. Built on the private ReminderKit fra
 - `reminderkit search --tag "tag1,tag2"` — search across all lists for reminders with any of the specified tags
 - `reminderkit search --has-url` — search across all lists for reminders that have a URL set
 - `reminderkit search --exclude-tag "tag1,tag2"` — search excluding reminders with any of the specified tags
+- `reminderkit search --notes-contains "blocked_by: ABC123"` — search for reminders containing text in their notes (case-insensitive)
+- `reminderkit list --name "List" --notes-contains "session: abc"` — list reminders in a list filtered by notes content
 - `reminderkit search --tag "status-needs-human-review" --has-url` — combine filters (e.g., PRs needing review)
 - `reminderkit search --title "bug" --tag "urgent"` — combine title search with tag filter
 - `reminderkit update --id <id> --title "New Title"` — rename a reminder
