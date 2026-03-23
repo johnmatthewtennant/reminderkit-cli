@@ -202,7 +202,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 4: cmdGet JSON shape...\n");
     {
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil, nil, nil, NO); });
+        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil, nil, nil, NO, nil); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -302,7 +302,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 13: cmdList JSON shape...\n");
     {
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO, nil, nil, NO); });
+        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO, nil, nil, NO, nil); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -787,13 +787,13 @@ static int cmdTest(id store) {
         else {
             // --tag should return only reminders with the tag
             __block int rInclude = -1;
-            NSData *outInclude = captureStdout(^{ rInclude = cmdList(store, testListName, NO, @"filter-test-tag", nil, NO); });
+            NSData *outInclude = captureStdout(^{ rInclude = cmdList(store, testListName, NO, @"filter-test-tag", nil, NO, nil); });
             // --exclude-tag should return reminders WITHOUT the tag
             __block int rExclude = -1;
-            NSData *outExclude = captureStdout(^{ rExclude = cmdList(store, testListName, NO, nil, @"filter-test-tag", NO); });
+            NSData *outExclude = captureStdout(^{ rExclude = cmdList(store, testListName, NO, nil, @"filter-test-tag", NO, nil); });
             // --tag + --exclude-tag combined (different tags)
             __block int rAll = -1;
-            NSData *outAll = captureStdout(^{ rAll = cmdList(store, testListName, NO, nil, nil, NO); });
+            NSData *outAll = captureStdout(^{ rAll = cmdList(store, testListName, NO, nil, nil, NO, nil); });
 
             if (rInclude != 0 || rExclude != 0 || rAll != 0) {
                 fprintf(stderr, "  FAIL (cmdList returned non-zero)\n"); failed++;
@@ -830,8 +830,8 @@ static int cmdTest(id store) {
         if (r43 != 0) { fprintf(stderr, "  FAIL (could not set URL)\n"); failed++; }
         else {
             __block int rAll = -1, rFiltered = -1;
-            NSData *outAll = captureStdout(^{ rAll = cmdList(store, testListName, YES, nil, nil, NO); });
-            NSData *outFiltered = captureStdout(^{ rFiltered = cmdList(store, testListName, YES, nil, nil, YES); });
+            NSData *outAll = captureStdout(^{ rAll = cmdList(store, testListName, YES, nil, nil, NO, nil); });
+            NSData *outFiltered = captureStdout(^{ rFiltered = cmdList(store, testListName, YES, nil, nil, YES, nil); });
             if (rAll != 0 || rFiltered != 0) {
                 fprintf(stderr, "  FAIL (cmdList returned non-zero)\n"); failed++;
             } else {
@@ -859,7 +859,7 @@ static int cmdTest(id store) {
         if (r45 != 0) { fprintf(stderr, "  FAIL (could not set URL)\n"); failed++; }
         else {
             __block int r = -1;
-            NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil, nil, nil, NO); });
+            NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil, nil, nil, NO, nil); });
             if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
             else {
                 id json = parseJSONFromData(out);
@@ -883,7 +883,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 46: no linkedNoteId for non-applenotes URLs...\n");
     {
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil, nil, nil, NO); });
+        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil, nil, nil, NO, nil); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -903,7 +903,7 @@ static int cmdTest(id store) {
         NSString *remTID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(remT, sel_registerName("objectID")));
         cmdAddTag(store, remTID, @"test-search-tag");
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, @"test-search-tag", nil, NO); });
+        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, @"test-search-tag", nil, NO, nil); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -923,7 +923,7 @@ static int cmdTest(id store) {
         NSString *remTID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(remT, sel_registerName("objectID")));
         cmdAddTag(store, remTID, @"test-exclude-tag");
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, nil, @"test-exclude-tag", NO); });
+        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, nil, @"test-exclude-tag", NO, nil); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -946,7 +946,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test: cmdGet zero-result filter returns empty array...\n");
     {
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, @"nonexistent-tag-xyz", nil, NO); });
+        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, @"nonexistent-tag-xyz", nil, NO, nil); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d, expected 0)\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -962,7 +962,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test: cmdGet --list only...\n");
     {
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, nil, nil, NO); });
+        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, nil, nil, NO, nil); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -981,7 +981,7 @@ static int cmdTest(id store) {
         NSString *remTID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(remT, sel_registerName("objectID")));
         cmdAddTag(store, remTID, @"test-combo-tag");
         __block int r = -1;
-        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil, @"test-combo-tag", nil, NO); });
+        NSData *out = captureStdout(^{ r = cmdGet(store, parentTitle, testListName, nil, @"test-combo-tag", nil, NO, nil); });
         if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
         else {
             id json = parseJSONFromData(out);
@@ -989,6 +989,114 @@ static int cmdTest(id store) {
             else { fprintf(stderr, "  PASS\n"); passed++; }
         }
         cmdRemoveTag(store, remTID, @"test-combo-tag");
+    }
+
+    // Test: cmdList --notes-contains filter
+    fprintf(stderr, "Test: cmdList --notes-contains filter...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO, nil, nil, NO, @"Appended line"); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) { fprintf(stderr, "  FAIL (not array)\n"); failed++; }
+            else {
+                // Should find at least the parent reminder which has "Appended line" in notes
+                BOOL found = NO;
+                for (NSDictionary *d in json) {
+                    NSString *n = d[@"notes"];
+                    if (n && [n rangeOfString:@"Appended line"].location != NSNotFound) found = YES;
+                }
+                if (found) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (no match found)\n"); failed++; }
+            }
+        }
+    }
+
+    // Test: cmdList --notes-contains no match returns empty
+    fprintf(stderr, "Test: cmdList --notes-contains no match...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdList(store, testListName, NO, nil, nil, NO, @"zzz-nonexistent-notes-zzz"); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (![json isKindOfClass:[NSArray class]]) { fprintf(stderr, "  FAIL (not array)\n"); failed++; }
+            else if ([json count] != 0) { fprintf(stderr, "  FAIL (expected empty, got %lu)\n", (unsigned long)[json count]); failed++; }
+            else { fprintf(stderr, "  PASS\n"); passed++; }
+        }
+    }
+
+    // Test: cmdGet --notes-contains filter (verify notes content)
+    fprintf(stderr, "Test: cmdGet --notes-contains filter...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, nil, nil, NO, @"Appended line"); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (!json) { fprintf(stderr, "  FAIL (no JSON)\n"); failed++; }
+            else {
+                // Result may be a single dict or array; normalize to array
+                NSArray *results = [json isKindOfClass:[NSArray class]] ? json : @[json];
+                BOOL allContain = YES;
+                for (NSDictionary *d in results) {
+                    NSString *n = d[@"notes"];
+                    if (!n || [[n lowercaseString] rangeOfString:@"appended line"].location == NSNotFound) { allContain = NO; break; }
+                }
+                if (results.count > 0 && allContain) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (results don't all contain filter text)\n"); failed++; }
+            }
+        }
+    }
+
+    // Test: cmdGet --notes-contains case insensitive (verify notes content)
+    fprintf(stderr, "Test: cmdGet --notes-contains case insensitive...\n");
+    {
+        __block int r = -1;
+        NSData *out = captureStdout(^{ r = cmdGet(store, nil, testListName, nil, nil, nil, NO, @"appended LINE"); });
+        if (r != 0) { fprintf(stderr, "  FAIL (returned %d)\n", r); failed++; }
+        else {
+            id json = parseJSONFromData(out);
+            if (!json) { fprintf(stderr, "  FAIL (no JSON)\n"); failed++; }
+            else {
+                NSArray *results = [json isKindOfClass:[NSArray class]] ? json : @[json];
+                BOOL allContain = YES;
+                for (NSDictionary *d in results) {
+                    NSString *n = d[@"notes"];
+                    if (!n || [[n lowercaseString] rangeOfString:@"appended line"].location == NSNotFound) { allContain = NO; break; }
+                }
+                if (results.count > 0 && allContain) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (case insensitive match failed)\n"); failed++; }
+            }
+        }
+    }
+
+    // Test: cmdListAll --notes-contains filter
+    fprintf(stderr, "Test: cmdListAll --notes-contains filter...\n");
+    {
+        __block int rMatch = -1;
+        __block int rNoMatch = -1;
+        NSData *outMatch = captureStdout(^{ rMatch = cmdListAll(store, NO, nil, nil, NO, @"Appended line"); });
+        NSData *outNoMatch = captureStdout(^{ rNoMatch = cmdListAll(store, NO, nil, nil, NO, @"zzz-nonexistent-listall-zzz"); });
+        if (rMatch != 0 || rNoMatch != 0) { fprintf(stderr, "  FAIL (returned match=%d noMatch=%d)\n", rMatch, rNoMatch); failed++; }
+        else {
+            id jsonMatch = parseJSONFromData(outMatch);
+            id jsonNoMatch = parseJSONFromData(outNoMatch);
+            if (![jsonMatch isKindOfClass:[NSArray class]] || ![jsonNoMatch isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not arrays)\n"); failed++;
+            } else {
+                BOOL matchHasResults = [jsonMatch count] > 0;
+                BOOL noMatchEmpty = [jsonNoMatch count] == 0;
+                BOOL allContain = YES;
+                for (NSDictionary *d in jsonMatch) {
+                    NSString *n = d[@"notes"];
+                    if (!n || [[n lowercaseString] rangeOfString:@"appended line"].location == NSNotFound) { allContain = NO; break; }
+                }
+                if (matchHasResults && allContain && noMatchEmpty) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (match=%lu allContain=%d noMatch=%lu)\n", (unsigned long)[jsonMatch count], allContain, (unsigned long)[jsonNoMatch count]); failed++; }
+            }
+        }
     }
 
     // Cleanup

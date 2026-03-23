@@ -15,11 +15,11 @@
 static void usage(void) {
     fprintf(stderr, "Usage:\n");
     fprintf(stderr, "  reminderkit lists\n");
-    fprintf(stderr, "  reminderkit list --name <name> [--include-completed] [--has-url] [--tag <tags>] [--exclude-tag <tags>]\n");
-    fprintf(stderr, "  reminderkit list --all [--include-completed] [--has-url] [--tag <tags>] [--exclude-tag <tags>]\n");
-    fprintf(stderr, "  reminderkit search [--title <title>] [--url <url>] [--list <name>] [--tag <tags>] [--exclude-tag <tags>] [--has-url]\n");
+    fprintf(stderr, "  reminderkit list --name <name> [--include-completed] [--has-url] [--tag <tags>] [--exclude-tag <tags>] [--notes-contains <text>]\n");
+    fprintf(stderr, "  reminderkit list --all [--include-completed] [--has-url] [--tag <tags>] [--exclude-tag <tags>] [--notes-contains <text>]\n");
+    fprintf(stderr, "  reminderkit search [--title <title>] [--url <url>] [--list <name>] [--tag <tags>] [--exclude-tag <tags>] [--has-url] [--notes-contains <text>]\n");
     fprintf(stderr, "  reminderkit search --id <id>\n");
-    fprintf(stderr, "  reminderkit get [--title <title>] [--url <url>] [--list <name>] [--tag <tags>] [--exclude-tag <tags>] [--has-url]  (alias for search)\n");
+    fprintf(stderr, "  reminderkit get [--title <title>] [--url <url>] [--list <name>] [--tag <tags>] [--exclude-tag <tags>] [--has-url] [--notes-contains <text>]  (alias for search)\n");
     fprintf(stderr, "  reminderkit get --id <id>\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
     fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
@@ -119,17 +119,17 @@ int main(int argc, const char *argv[]) {
         } else if ([command isEqualToString:@"list"]) {
             BOOL allLists = [opts[@"all"] isEqualToString:@"true"];
             if (allLists) {
-                return cmdListAll(store, includeCompleted, opts[@"tag"], opts[@"exclude-tag"], hasURL);
+                return cmdListAll(store, includeCompleted, opts[@"tag"], opts[@"exclude-tag"], hasURL, opts[@"notes-contains"]);
             }
             if (!kwName) { fprintf(stderr, "Error: --name or --all required\n"); usage(); return 1; }
-            return cmdList(store, kwName, includeCompleted, opts[@"tag"], opts[@"exclude-tag"], hasURL);
+            return cmdList(store, kwName, includeCompleted, opts[@"tag"], opts[@"exclude-tag"], hasURL, opts[@"notes-contains"]);
 
         } else if ([command isEqualToString:@"search"] || [command isEqualToString:@"get"]) {
             if (opts[@"id"] && [opts[@"id"] length] > 0) {
                 return cmdGetByID(store, opts[@"id"]);
             }
-            if (!kwTitle && !opts[@"url"] && !kwTag && !opts[@"exclude-tag"] && !hasURL && !listName) { fprintf(stderr, "Error: --title, --url, --id, --tag, --exclude-tag, --has-url, or --list required\n"); usage(); return 1; }
-            return cmdGet(store, kwTitle, listName, opts[@"url"], kwTag, opts[@"exclude-tag"], hasURL);
+            if (!kwTitle && !opts[@"url"] && !kwTag && !opts[@"exclude-tag"] && !hasURL && !listName && !opts[@"notes-contains"]) { fprintf(stderr, "Error: --title, --url, --id, --tag, --exclude-tag, --has-url, --notes-contains, or --list required\n"); usage(); return 1; }
+            return cmdGet(store, kwTitle, listName, opts[@"url"], kwTag, opts[@"exclude-tag"], hasURL, opts[@"notes-contains"]);
 
         } else if ([command isEqualToString:@"subtasks"]) {
             if (!kwTitle) { fprintf(stderr, "Error: --title required\n"); usage(); return 1; }
