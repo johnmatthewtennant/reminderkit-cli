@@ -1027,7 +1027,7 @@ static int cmdTest(id store) {
         }
     }
 
-    // Test: cmdGet --notes-contains filter
+    // Test: cmdGet --notes-contains filter (verify notes content)
     fprintf(stderr, "Test: cmdGet --notes-contains filter...\n");
     {
         __block int r = -1;
@@ -1036,11 +1036,21 @@ static int cmdTest(id store) {
         else {
             id json = parseJSONFromData(out);
             if (!json) { fprintf(stderr, "  FAIL (no JSON)\n"); failed++; }
-            else { fprintf(stderr, "  PASS\n"); passed++; }
+            else {
+                // Result may be a single dict or array; normalize to array
+                NSArray *results = [json isKindOfClass:[NSArray class]] ? json : @[json];
+                BOOL allContain = YES;
+                for (NSDictionary *d in results) {
+                    NSString *n = d[@"notes"];
+                    if (!n || [[n lowercaseString] rangeOfString:@"appended line"].location == NSNotFound) { allContain = NO; break; }
+                }
+                if (results.count > 0 && allContain) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (results don't all contain filter text)\n"); failed++; }
+            }
         }
     }
 
-    // Test: cmdGet --notes-contains case insensitive
+    // Test: cmdGet --notes-contains case insensitive (verify notes content)
     fprintf(stderr, "Test: cmdGet --notes-contains case insensitive...\n");
     {
         __block int r = -1;
@@ -1049,7 +1059,43 @@ static int cmdTest(id store) {
         else {
             id json = parseJSONFromData(out);
             if (!json) { fprintf(stderr, "  FAIL (no JSON)\n"); failed++; }
-            else { fprintf(stderr, "  PASS\n"); passed++; }
+            else {
+                NSArray *results = [json isKindOfClass:[NSArray class]] ? json : @[json];
+                BOOL allContain = YES;
+                for (NSDictionary *d in results) {
+                    NSString *n = d[@"notes"];
+                    if (!n || [[n lowercaseString] rangeOfString:@"appended line"].location == NSNotFound) { allContain = NO; break; }
+                }
+                if (results.count > 0 && allContain) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (case insensitive match failed)\n"); failed++; }
+            }
+        }
+    }
+
+    // Test: cmdListAll --notes-contains filter
+    fprintf(stderr, "Test: cmdListAll --notes-contains filter...\n");
+    {
+        __block int rMatch = -1;
+        __block int rNoMatch = -1;
+        NSData *outMatch = captureStdout(^{ rMatch = cmdListAll(store, NO, nil, nil, NO, @"Appended line"); });
+        NSData *outNoMatch = captureStdout(^{ rNoMatch = cmdListAll(store, NO, nil, nil, NO, @"zzz-nonexistent-listall-zzz"); });
+        if (rMatch != 0 || rNoMatch != 0) { fprintf(stderr, "  FAIL (returned match=%d noMatch=%d)\n", rMatch, rNoMatch); failed++; }
+        else {
+            id jsonMatch = parseJSONFromData(outMatch);
+            id jsonNoMatch = parseJSONFromData(outNoMatch);
+            if (![jsonMatch isKindOfClass:[NSArray class]] || ![jsonNoMatch isKindOfClass:[NSArray class]]) {
+                fprintf(stderr, "  FAIL (not arrays)\n"); failed++;
+            } else {
+                BOOL matchHasResults = [jsonMatch count] > 0;
+                BOOL noMatchEmpty = [jsonNoMatch count] == 0;
+                BOOL allContain = YES;
+                for (NSDictionary *d in jsonMatch) {
+                    NSString *n = d[@"notes"];
+                    if (!n || [[n lowercaseString] rangeOfString:@"appended line"].location == NSNotFound) { allContain = NO; break; }
+                }
+                if (matchHasResults && allContain && noMatchEmpty) { fprintf(stderr, "  PASS\n"); passed++; }
+                else { fprintf(stderr, "  FAIL (match=%lu allContain=%d noMatch=%lu)\n", (unsigned long)[jsonMatch count], allContain, (unsigned long)[jsonNoMatch count]); failed++; }
+            }
         }
     }
 
