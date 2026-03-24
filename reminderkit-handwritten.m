@@ -227,10 +227,21 @@ static int cmdBatch(id store) {
                 [results addObject:@{@"op": @"update", @"id": remIDStr ?: @"", @"status": @"ok"}];
 
             } else if ([opType isEqualToString:@"add-tag"]) {
-                id hashtagCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("hashtagContext"));
-                if (!hashtagCtx) errorExit(@"Failed to get hashtag context");
-                ((void (*)(id, SEL, NSUInteger, id))objc_msgSend)(
-                    hashtagCtx, sel_registerName("addHashtagWithType:name:"), (NSUInteger)0, op[@"tag"]);
+                // Check if tag already exists (idempotent add)
+                NSSet *existingTags = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("hashtags"));
+                BOOL tagExists = NO;
+                if (existingTags) {
+                    for (id tag in existingTags) {
+                        NSString *name = ((id (*)(id, SEL))objc_msgSend)(tag, sel_registerName("name"));
+                        if ([name isEqualToString:op[@"tag"]]) { tagExists = YES; break; }
+                    }
+                }
+                if (!tagExists) {
+                    id hashtagCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("hashtagContext"));
+                    if (!hashtagCtx) errorExit(@"Failed to get hashtag context");
+                    ((void (*)(id, SEL, NSUInteger, id))objc_msgSend)(
+                        hashtagCtx, sel_registerName("addHashtagWithType:name:"), (NSUInteger)0, op[@"tag"]);
+                }
                 [results addObject:@{@"op": @"add-tag", @"id": remIDStr ?: @"", @"tag": op[@"tag"], @"status": @"ok"}];
 
             } else if ([opType isEqualToString:@"remove-tag"]) {
