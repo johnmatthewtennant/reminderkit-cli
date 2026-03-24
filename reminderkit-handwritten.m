@@ -84,6 +84,8 @@ static int cmdBatch(id store) {
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
 
     NSMutableArray *results = [NSMutableArray array];
+    // Track tags added during this batch to dedupe within a single batch payload
+    NSMutableDictionary *batchAddedTags = [NSMutableDictionary dictionary]; // remID -> NSMutableSet of tag names
 
     for (NSDictionary *op in ops) {
         NSString *opType = op[@"op"];
@@ -227,10 +229,33 @@ static int cmdBatch(id store) {
                 [results addObject:@{@"op": @"update", @"id": remIDStr ?: @"", @"status": @"ok"}];
 
             } else if ([opType isEqualToString:@"add-tag"]) {
-                id hashtagCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("hashtagContext"));
-                if (!hashtagCtx) errorExit(@"Failed to get hashtag context");
-                ((void (*)(id, SEL, NSUInteger, id))objc_msgSend)(
-                    hashtagCtx, sel_registerName("addHashtagWithType:name:"), (NSUInteger)0, op[@"tag"]);
+                // Check if tag already exists on reminder (idempotent add)
+                NSSet *existingTags = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("hashtags"));
+                BOOL tagExists = NO;
+                if (existingTags) {
+                    for (id tag in existingTags) {
+                        NSString *name = ((id (*)(id, SEL))objc_msgSend)(tag, sel_registerName("name"));
+                        if ([name isEqualToString:op[@"tag"]]) { tagExists = YES; break; }
+                    }
+                }
+                // Also check tags added earlier in this batch (not yet saved)
+                if (!tagExists && remIDStr) {
+                    NSMutableSet *pendingTags = batchAddedTags[remIDStr];
+                    if (pendingTags && [pendingTags containsObject:op[@"tag"]]) {
+                        tagExists = YES;
+                    }
+                }
+                if (!tagExists) {
+                    id hashtagCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("hashtagContext"));
+                    if (!hashtagCtx) errorExit(@"Failed to get hashtag context");
+                    ((void (*)(id, SEL, NSUInteger, id))objc_msgSend)(
+                        hashtagCtx, sel_registerName("addHashtagWithType:name:"), (NSUInteger)0, op[@"tag"]);
+                    // Track this tag as pending for this reminder
+                    if (remIDStr) {
+                        if (!batchAddedTags[remIDStr]) batchAddedTags[remIDStr] = [NSMutableSet set];
+                        [batchAddedTags[remIDStr] addObject:op[@"tag"]];
+                    }
+                }
                 [results addObject:@{@"op": @"add-tag", @"id": remIDStr ?: @"", @"tag": op[@"tag"], @"status": @"ok"}];
 
             } else if ([opType isEqualToString:@"remove-tag"]) {

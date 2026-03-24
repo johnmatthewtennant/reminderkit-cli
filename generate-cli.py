@@ -949,6 +949,19 @@ static int cmdAddTag(id store, NSString *remID, NSString *tagName) {
     id rem = findReminderByID(store, remID);
     if (!rem) errorExit([NSString stringWithFormat:@"Reminder not found with id: %@", remID]);
 
+    // Check if tag already exists (idempotent add)
+    NSSet *existingTags = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("hashtags"));
+    if (existingTags) {
+        for (id tag in existingTags) {
+            NSString *name = ((id (*)(id, SEL))objc_msgSend)(tag, sel_registerName("name"));
+            if ([name isEqualToString:tagName]) {
+                // Tag already exists, return current state (no-op)
+                printJSON(reminderToDict(rem));
+                return 0;
+            }
+        }
+    }
+
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
 
