@@ -39,7 +39,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit delete-list --name <name>\n");
     fprintf(stderr, "  reminderkit list-groups\n");
     fprintf(stderr, "  reminderkit create-group --name <name>\n");
-    fprintf(stderr, "  reminderkit delete-group --name <name>\n");
+    fprintf(stderr, "  reminderkit delete-group --name <name> [--force]\n");
     fprintf(stderr, "  reminderkit rename-group --old-name <old-name> --new-name <new-name>\n");
     fprintf(stderr, "  reminderkit move-list-to-group --list <list-name> --group <group-name>\n");
     fprintf(stderr, "  reminderkit remove-list-from-group --list <list-name>\n");
@@ -219,7 +219,8 @@ int main(int argc, const char *argv[]) {
 
         } else if ([command isEqualToString:@"delete-group"]) {
             if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
-            return cmdDeleteGroup(store, kwName);
+            BOOL forceDeleteGroup = [opts[@"force"] isEqualToString:@"true"];
+            return cmdDeleteGroup(store, kwName, forceDeleteGroup);
 
         } else if ([command isEqualToString:@"rename-group"]) {
             if (!kwOldName || !kwNewName) { fprintf(stderr, "Error: --old-name and --new-name required\n"); usage(); return 1; }

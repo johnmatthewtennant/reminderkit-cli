@@ -1117,7 +1117,7 @@ static int cmdTest(id store) {
     fprintf(stderr, "Test 47: cmdCreateGroup...\n");
     { int r = cmdCreateGroup(store, testGroupName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 48: cmdListGroups (verify test group appears)
+    // Test 48: cmdListGroups (verify test group appears with account info)
     fprintf(stderr, "Test 48: cmdListGroups...\n");
     {
         __block int r = -1;
@@ -1126,8 +1126,12 @@ static int cmdTest(id store) {
         else {
             id json = parseJSONFromData(out);
             if (![json isKindOfClass:[NSArray class]]) { fprintf(stderr, "  FAIL (not array)\n"); failed++; }
-            else if (!jsonArrayFind(json, @"name", testGroupName)) { fprintf(stderr, "  FAIL (test group not found)\n"); failed++; }
-            else { fprintf(stderr, "  PASS\n"); passed++; }
+            else {
+                NSDictionary *found = jsonArrayFind(json, @"name", testGroupName);
+                if (!found) { fprintf(stderr, "  FAIL (test group not found)\n"); failed++; }
+                else if (!found[@"accountId"]) { fprintf(stderr, "  FAIL (missing accountId)\n"); failed++; }
+                else { fprintf(stderr, "  PASS\n"); passed++; }
+            }
         }
     }
 
@@ -1140,17 +1144,41 @@ static int cmdTest(id store) {
         if (parent) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (no parent after move)\n"); failed++; }
     } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 50: cmdRemoveListFromGroup
-    fprintf(stderr, "Test 50: cmdRemoveListFromGroup...\n");
-    { int r = cmdRemoveListFromGroup(store, testListName); if (r==0) {
-        // Verify parentList is nil
-        id unmovedList = findList(store, testListName);
-        id parent2 = ((id (*)(id, SEL))objc_msgSend)(unmovedList, sel_registerName("parentList"));
-        if (!parent2) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still has parent)\n"); failed++; }
+    // Test 50: delete-group non-empty without --force exits non-zero
+    fprintf(stderr, "Test 50: delete-group non-empty exits non-zero...\n");
+    {
+        const char *args[] = {"delete-group", "--name", [testGroupName UTF8String], NULL};
+        if (assertCliExitsNonZero("delete-group non-empty", args)) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { failed++; }
+    }
+
+    // Test 51: delete-group --force moves lists out and deletes group
+    fprintf(stderr, "Test 51: delete-group --force...\n");
+    { int r = cmdDeleteGroup(store, testGroupName, YES); if (r==0) {
+        id gone = findGroup(store, testGroupName);
+        id survivedList = findList(store, testListName);
+        id parentAfter = survivedList ? ((id (*)(id, SEL))objc_msgSend)(survivedList, sel_registerName("parentList")) : nil;
+        if (!gone && survivedList && !parentAfter) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL (gone=%p list=%p parent=%p)\n", gone, survivedList, parentAfter); failed++; }
     } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 51: cmdRenameGroup
-    fprintf(stderr, "Test 51: cmdRenameGroup...\n");
+    // Test 52: cmdCreateGroup (recreate for remaining tests)
+    fprintf(stderr, "Test 52: cmdCreateGroup (recreate)...\n");
+    { int r = cmdCreateGroup(store, testGroupName); if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+
+    // Test 53: cmdMoveListToGroup + cmdRemoveListFromGroup
+    fprintf(stderr, "Test 53: cmdRemoveListFromGroup...\n");
+    { int r = cmdMoveListToGroup(store, testListName, testGroupName); if (r!=0) { fprintf(stderr, "  FAIL (move)\n"); failed++; }
+      else {
+        int r2 = cmdRemoveListFromGroup(store, testListName); if (r2==0) {
+            id unmovedList = findList(store, testListName);
+            id parent2 = ((id (*)(id, SEL))objc_msgSend)(unmovedList, sel_registerName("parentList"));
+            if (!parent2) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still has parent)\n"); failed++; }
+        } else { fprintf(stderr, "  FAIL\n"); failed++; }
+    } }
+
+    // Test 54: cmdRenameGroup
+    fprintf(stderr, "Test 54: cmdRenameGroup...\n");
     { NSString *renamedGroup = @"__remcli_test_group_renamed__";
       int r = cmdRenameGroup(store, testGroupName, renamedGroup); if (r==0) {
         id found = findGroup(store, renamedGroup);
@@ -1159,16 +1187,16 @@ static int cmdTest(id store) {
         cmdRenameGroup(store, renamedGroup, testGroupName);
     } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
-    // Test 52: cmdDeleteGroup
-    fprintf(stderr, "Test 52: cmdDeleteGroup...\n");
-    { int r = cmdDeleteGroup(store, testGroupName); if (r==0) {
+    // Test 55: cmdDeleteGroup empty group
+    fprintf(stderr, "Test 55: cmdDeleteGroup empty...\n");
+    { int r = cmdDeleteGroup(store, testGroupName, NO); if (r==0) {
         id gone2 = findGroup(store, testGroupName);
         if (!gone2) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
     } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
     // Cleanup
-    // Test 53: cmdDelete child
-    fprintf(stderr, "Test 53: cmdDelete child...\n");
+    // Test 56: cmdDelete child
+    fprintf(stderr, "Test 56: cmdDelete child...\n");
     {
         id rem38 = findReminder(store, childTitle, testListName);
         NSString *rem38ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem38, sel_registerName("objectID")));
@@ -1176,8 +1204,8 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 54: cmdDelete parent
-    fprintf(stderr, "Test 54: cmdDelete parent...\n");
+    // Test 57: cmdDelete parent
+    fprintf(stderr, "Test 57: cmdDelete parent...\n");
     {
         id rem45 = findReminder(store, parentTitle, testListName);
         NSString *rem45ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem45, sel_registerName("objectID")));
@@ -1185,8 +1213,8 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 55: cmdDeleteList
-    fprintf(stderr, "Test 55: cmdDeleteList...\n");
+    // Test 58: cmdDeleteList
+    fprintf(stderr, "Test 58: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }

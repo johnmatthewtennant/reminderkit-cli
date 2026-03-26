@@ -366,14 +366,30 @@ static id requireUniqueReminder(id store, NSString *title, NSString *listName) {
 
 // --- Group Helpers ---
 
-static id getDefaultAccount(id store) {
+static NSArray *getAllAccounts(id store) {
     NSArray *lists = fetchLists(store);
-    if (lists.count == 0) errorExit(@"No accounts found");
-    return ((id (*)(id, SEL))objc_msgSend)(lists[0], sel_registerName("account"));
+    NSMutableArray *accounts = [NSMutableArray array];
+    NSMutableSet *seenIDs = [NSMutableSet set];
+    for (id list in lists) {
+        id account = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("account"));
+        if (!account) continue;
+        id objID = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("objectID"));
+        NSString *idStr = objectIDToString(objID);
+        if (idStr && ![seenIDs containsObject:idStr]) {
+            [seenIDs addObject:idStr];
+            [accounts addObject:account];
+        }
+    }
+    return accounts;
 }
 
-static NSArray *fetchGroups(id store) {
-    id account = getDefaultAccount(store);
+static id getDefaultAccount(id store) {
+    NSArray *accounts = getAllAccounts(store);
+    if (accounts.count == 0) errorExit(@"No accounts found");
+    return accounts[0];
+}
+
+static NSArray *fetchGroupsForAccount(id account) {
     id groupCtx = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("groupContext"));
     if (!groupCtx) return @[];
     NSError *error = nil;
@@ -383,14 +399,13 @@ static NSArray *fetchGroups(id store) {
     return groups ?: @[];
 }
 
-static id findGroup(id store, NSString *name) {
-    NSArray *groups = fetchGroups(store);
+static id findGroupInAccount(id account, NSString *name) {
+    NSArray *groups = fetchGroupsForAccount(account);
     for (id group in groups) {
         id storage = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("storage"));
         NSString *groupName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
         if ([groupName isEqualToString:name]) return group;
     }
-    // Normalized fallback
     NSString *normalizedName = normalizeQuotes(name);
     for (id group in groups) {
         id storage = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("storage"));
@@ -398,6 +413,43 @@ static id findGroup(id store, NSString *name) {
         if ([normalizeQuotes(groupName) isEqualToString:normalizedName]) return group;
     }
     return nil;
+}
+
+static id findGroupAcrossAccounts(id store, NSString *name) {
+    NSArray *accounts = getAllAccounts(store);
+    NSMutableArray *matches = [NSMutableArray array];
+    for (id account in accounts) {
+        id match = findGroupInAccount(account, name);
+        if (match) [matches addObject:match];
+    }
+    if (matches.count == 0) return nil;
+    if (matches.count == 1) return matches[0];
+    NSMutableString *msg = [NSMutableString stringWithFormat:
+        @"Multiple groups named '%@' found across different accounts. Use list-groups to identify the account, then disambiguate.", name];
+    errorExit(msg);
+    return nil;
+}
+
+static id findGroup(id store, NSString *name) {
+    return findGroupInAccount(getDefaultAccount(store), name);
+}
+
+static NSArray *getListsInGroup(NSArray *lists, id group) {
+    id gobjID = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("objectID"));
+    NSString *gobjIDStr = objectIDToString(gobjID);
+    NSMutableArray *members = [NSMutableArray array];
+    for (id list in lists) {
+        @try {
+            id parentList = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
+            if (parentList) {
+                id parentObjID = ((id (*)(id, SEL))objc_msgSend)(parentList, sel_registerName("objectID"));
+                if (parentObjID && [objectIDToString(parentObjID) isEqualToString:gobjIDStr]) {
+                    [members addObject:list];
+                }
+            }
+        } @catch (NSException *e) {}
+    }
+    return members;
 }
 '''
 
@@ -923,10 +975,7 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
 }
 
 static int cmdCreateList(id store, NSString *name) {
-    // Get default account from the first list
-    NSArray *lists = fetchLists(store);
-    if (lists.count == 0) errorExit(@"No accounts found");
-    id account = ((id (*)(id, SEL))objc_msgSend)(lists[0], sel_registerName("account"));
+    id account = getDefaultAccount(store);
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
@@ -1128,33 +1177,41 @@ def generate_group_commands():
 // --- Group Commands ---
 
 static int cmdListGroups(id store) {
-    NSArray *groups = fetchGroups(store);
-    NSArray *lists = fetchLists(store);
+    NSArray *accounts = getAllAccounts(store);
+    NSArray *allLists = fetchLists(store);
     NSMutableArray *result = [NSMutableArray array];
-    for (id group in groups) {
-        id gstorage = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("storage"));
-        NSString *gname = ((id (*)(id, SEL))objc_msgSend)(gstorage, sel_registerName("name"));
-        id gobjID = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("objectID"));
-        NSString *gobjIDStr = objectIDToString(gobjID);
+    for (id account in accounts) {
+        NSArray *groups = fetchGroupsForAccount(account);
+        NSString *accountName = nil;
+        NSString *accObjIDStr = nil;
+        @try {
+            id accObjID = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("objectID"));
+            accObjIDStr = objectIDToString(accObjID);
+            id accStorage = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("storage"));
+            accountName = ((id (*)(id, SEL))objc_msgSend)(accStorage, sel_registerName("name"));
+        } @catch (NSException *e) {}
 
-        // Find lists belonging to this group
-        NSMutableArray *members = [NSMutableArray array];
-        for (id list in lists) {
-            @try {
-                id parentList = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
-                if (parentList) {
-                    id parentObjID = ((id (*)(id, SEL))objc_msgSend)(parentList, sel_registerName("objectID"));
-                    if (parentObjID && [objectIDToString(parentObjID) isEqualToString:gobjIDStr]) {
-                        id lstorage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
-                        NSString *lname = ((id (*)(id, SEL))objc_msgSend)(lstorage, sel_registerName("name"));
-                        id lobjID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
-                        [members addObject:@{@"name": lname ?: @"", @"id": objectIDToString(lobjID) ?: @""}];
-                    }
-                }
-            } @catch (NSException *e) {}
+        for (id group in groups) {
+            id gstorage = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("storage"));
+            NSString *gname = ((id (*)(id, SEL))objc_msgSend)(gstorage, sel_registerName("name"));
+            id gobjID = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("objectID"));
+            NSString *gobjIDStr = objectIDToString(gobjID);
+
+            NSArray *memberLists = getListsInGroup(allLists, group);
+            NSMutableArray *members = [NSMutableArray array];
+            for (id list in memberLists) {
+                id lstorage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+                NSString *lname = ((id (*)(id, SEL))objc_msgSend)(lstorage, sel_registerName("name"));
+                id lobjID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
+                [members addObject:@{@"name": lname ?: @"", @"id": objectIDToString(lobjID) ?: @""}];
+            }
+
+            NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:
+                @{@"name": gname ?: @"", @"id": gobjIDStr ?: @"", @"lists": members}];
+            if (accountName) entry[@"accountName"] = accountName;
+            if (accObjIDStr) entry[@"accountId"] = accObjIDStr;
+            [result addObject:entry];
         }
-
-        [result addObject:@{@"name": gname ?: @"", @"id": gobjIDStr ?: @"", @"lists": members}];
     }
     printJSON(result);
     return 0;
@@ -1187,12 +1244,34 @@ static int cmdCreateGroup(id store, NSString *name) {
     return 0;
 }
 
-static int cmdDeleteGroup(id store, NSString *name) {
-    id group = findGroup(store, name);
+static int cmdDeleteGroup(id store, NSString *name, BOOL force) {
+    id group = findGroupAcrossAccounts(store, name);
     if (!group) errorExit([NSString stringWithFormat:@"Group not found: %@", name]);
+
+    NSArray *memberLists = getListsInGroup(fetchLists(store), group);
+    if (memberLists.count > 0 && !force) {
+        NSMutableString *msg = [NSMutableString stringWithFormat:
+            @"Group '%@' contains %lu list(s):", name, (unsigned long)memberLists.count];
+        for (id list in memberLists) {
+            id lstorage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+            NSString *lname = ((id (*)(id, SEL))objc_msgSend)(lstorage, sel_registerName("name"));
+            [msg appendFormat:@" %@", lname ?: @"(unknown)"];
+        }
+        [msg appendString:@". Use --force to move lists to top level and delete the group."];
+        errorExit(msg);
+    }
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+
+    for (id list in memberLists) {
+        id listAccount = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("account"));
+        id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
+            saveReq, sel_registerName("updateList:"), list);
+        id accountCI = ((id (*)(id, SEL, id))objc_msgSend)(
+            saveReq, sel_registerName("updateAccount:"), listAccount);
+        ((void (*)(id, SEL, id))objc_msgSend)(accountCI, sel_registerName("addListChangeItem:"), listCI);
+    }
 
     id groupCI = ((id (*)(id, SEL, id))objc_msgSend)(
         saveReq, sel_registerName("updateList:"), group);
@@ -1209,7 +1288,7 @@ static int cmdDeleteGroup(id store, NSString *name) {
 }
 
 static int cmdRenameGroup(id store, NSString *oldName, NSString *newName) {
-    id group = findGroup(store, oldName);
+    id group = findGroupAcrossAccounts(store, oldName);
     if (!group) errorExit([NSString stringWithFormat:@"Group not found: %@", oldName]);
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
@@ -1234,8 +1313,17 @@ static int cmdMoveListToGroup(id store, NSString *listName, NSString *groupName)
     id list = findList(store, listName);
     if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
 
-    id group = findGroup(store, groupName);
-    if (!group) errorExit([NSString stringWithFormat:@"Group not found: %@", groupName]);
+    id listAccount = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("account"));
+    id group = findGroupInAccount(listAccount, groupName);
+    if (!group) {
+        NSString *accName = nil;
+        @try {
+            id accStorage = ((id (*)(id, SEL))objc_msgSend)(listAccount, sel_registerName("storage"));
+            accName = ((id (*)(id, SEL))objc_msgSend)(accStorage, sel_registerName("name"));
+        } @catch (NSException *e) {}
+        errorExit([NSString stringWithFormat:
+            @"Group '%@' not found in account '%@' (the list's account)", groupName, accName ?: @"unknown"]);
+    }
 
     BOOL canBeInGroup = ((BOOL (*)(id, SEL))objc_msgSend)(list, sel_registerName("canBeIncludedInGroup"));
     if (!canBeInGroup) errorExit([NSString stringWithFormat:@"List '%@' cannot be added to a group", listName]);
