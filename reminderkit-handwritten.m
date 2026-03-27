@@ -563,3 +563,265 @@ static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
 
     return failures > 0 ? 1 : 0;
 }
+
+
+// --- Group Helpers ---
+
+static id findGroupInAccount(id account, NSString *name) {
+    NSArray *groups = fetchGroupsForAccount(account);
+    for (id group in groups) {
+        id storage = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("storage"));
+        NSString *groupName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
+        if ([groupName isEqualToString:name]) return group;
+    }
+    NSString *normalizedName = normalizeQuotes(name);
+    for (id group in groups) {
+        id storage = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("storage"));
+        NSString *groupName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
+        if ([normalizeQuotes(groupName) isEqualToString:normalizedName]) return group;
+    }
+    return nil;
+}
+
+static id findGroupAcrossAccounts(id store, NSString *name) {
+    NSArray *accounts = getAllAccounts(store);
+    NSMutableArray *matches = [NSMutableArray array];
+    for (id account in accounts) {
+        id match = findGroupInAccount(account, name);
+        if (match) [matches addObject:match];
+    }
+    if (matches.count == 0) return nil;
+    if (matches.count == 1) return matches[0];
+    NSMutableString *msg = [NSMutableString stringWithFormat:
+        @"Multiple groups named '%@' found across different accounts. Use list-groups to identify the account, then disambiguate.", name];
+    errorExit(msg);
+    return nil;
+}
+
+static id findGroup(id store, NSString *name) {
+    return findGroupInAccount(getDefaultAccount(store), name);
+}
+
+static NSArray *getListsInGroup(NSArray *lists, id group) {
+    id gobjID = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("objectID"));
+    NSString *gobjIDStr = objectIDToString(gobjID);
+    NSMutableArray *members = [NSMutableArray array];
+    for (id list in lists) {
+        @try {
+            id parentList = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
+            if (parentList) {
+                id parentObjID = ((id (*)(id, SEL))objc_msgSend)(parentList, sel_registerName("objectID"));
+                if (parentObjID && [objectIDToString(parentObjID) isEqualToString:gobjIDStr]) {
+                    [members addObject:list];
+                }
+            }
+        } @catch (NSException *e) {}
+    }
+    return members;
+}
+
+// --- Group Commands ---
+
+static int cmdListGroups(id store) {
+    NSArray *accounts = getAllAccounts(store);
+    NSArray *allLists = fetchLists(store);
+    NSMutableArray *result = [NSMutableArray array];
+    for (id account in accounts) {
+        NSArray *groups = fetchGroupsForAccount(account);
+        NSString *accountName = nil;
+        NSString *accObjIDStr = nil;
+        @try {
+            id accObjID = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("objectID"));
+            accObjIDStr = objectIDToString(accObjID);
+            id accStorage = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("storage"));
+            accountName = ((id (*)(id, SEL))objc_msgSend)(accStorage, sel_registerName("name"));
+        } @catch (NSException *e) {}
+
+        for (id group in groups) {
+            id gstorage = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("storage"));
+            NSString *gname = ((id (*)(id, SEL))objc_msgSend)(gstorage, sel_registerName("name"));
+            id gobjID = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("objectID"));
+            NSString *gobjIDStr = objectIDToString(gobjID);
+
+            NSArray *memberLists = getListsInGroup(allLists, group);
+            NSMutableArray *members = [NSMutableArray array];
+            for (id list in memberLists) {
+                id lstorage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+                NSString *lname = ((id (*)(id, SEL))objc_msgSend)(lstorage, sel_registerName("name"));
+                id lobjID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
+                [members addObject:@{@"name": lname ?: @"", @"id": objectIDToString(lobjID) ?: @""}];
+            }
+
+            NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:
+                @{@"name": gname ?: @"", @"id": gobjIDStr ?: @"", @"lists": members}];
+            if (accountName) entry[@"accountName"] = accountName;
+            if (accObjIDStr) entry[@"accountId"] = accObjIDStr;
+            [result addObject:entry];
+        }
+    }
+    printJSON(result);
+    return 0;
+}
+
+static int cmdCreateGroup(id store, NSString *name) {
+    id account = getDefaultAccount(store);
+
+    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+
+    id accountCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateAccount:"), account);
+
+    id groupCtxCI = ((id (*)(id, SEL))objc_msgSend)(accountCI, sel_registerName("groupContext"));
+    if (!groupCtxCI) errorExit(@"Failed to get group context");
+
+    id newGroup = ((id (*)(id, SEL, id, id))objc_msgSend)(
+        saveReq, sel_registerName("addGroupWithName:toAccountGroupContextChangeItem:"),
+        name, groupCtxCI);
+
+    if (!newGroup) errorExit(@"Failed to create group");
+
+    NSError *error = nil;
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+        saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    printJSON(@{@"name": name, @"created": @YES});
+    return 0;
+}
+
+static int cmdDeleteGroup(id store, NSString *name, BOOL force) {
+    id group = findGroupAcrossAccounts(store, name);
+    if (!group) errorExit([NSString stringWithFormat:@"Group not found: %@", name]);
+
+    NSArray *memberLists = getListsInGroup(fetchLists(store), group);
+    if (memberLists.count > 0 && !force) {
+        NSMutableString *msg = [NSMutableString stringWithFormat:
+            @"Group '%@' contains %lu list(s):", name, (unsigned long)memberLists.count];
+        for (id list in memberLists) {
+            id lstorage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+            NSString *lname = ((id (*)(id, SEL))objc_msgSend)(lstorage, sel_registerName("name"));
+            [msg appendFormat:@" %@", lname ?: @"(unknown)"];
+        }
+        [msg appendString:@". Use --force to move lists to top level and delete the group."];
+        errorExit(msg);
+    }
+
+    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+
+    for (id list in memberLists) {
+        id listAccount = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("account"));
+        id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
+            saveReq, sel_registerName("updateList:"), list);
+        id accountCI = ((id (*)(id, SEL, id))objc_msgSend)(
+            saveReq, sel_registerName("updateAccount:"), listAccount);
+        ((void (*)(id, SEL, id))objc_msgSend)(accountCI, sel_registerName("addListChangeItem:"), listCI);
+    }
+
+    id groupCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateList:"), group);
+
+    ((void (*)(id, SEL))objc_msgSend)(groupCI, sel_registerName("removeFromParent"));
+
+    NSError *error = nil;
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+        saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    printJSON(@{@"name": name, @"deleted": @YES});
+    return 0;
+}
+
+static int cmdRenameGroup(id store, NSString *oldName, NSString *newName) {
+    id group = findGroupAcrossAccounts(store, oldName);
+    if (!group) errorExit([NSString stringWithFormat:@"Group not found: %@", oldName]);
+
+    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+
+    id groupCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateList:"), group);
+
+    id storage = ((id (*)(id, SEL))objc_msgSend)(groupCI, sel_registerName("storage"));
+    ((void (*)(id, SEL, id))objc_msgSend)(storage, sel_registerName("setName:"), newName);
+
+    NSError *error = nil;
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+        saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    printJSON(@{@"oldName": oldName, @"newName": newName, @"renamed": @YES});
+    return 0;
+}
+
+static int cmdMoveListToGroup(id store, NSString *listName, NSString *groupName) {
+    id list = findList(store, listName);
+    if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
+
+    id listAccount = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("account"));
+    id group = findGroupInAccount(listAccount, groupName);
+    if (!group) {
+        NSString *accName = nil;
+        @try {
+            id accStorage = ((id (*)(id, SEL))objc_msgSend)(listAccount, sel_registerName("storage"));
+            accName = ((id (*)(id, SEL))objc_msgSend)(accStorage, sel_registerName("name"));
+        } @catch (NSException *e) {}
+        errorExit([NSString stringWithFormat:
+            @"Group '%@' not found in account '%@' (the list's account)", groupName, accName ?: @"unknown"]);
+    }
+
+    BOOL canBeInGroup = ((BOOL (*)(id, SEL))objc_msgSend)(list, sel_registerName("canBeIncludedInGroup"));
+    if (!canBeInGroup) errorExit([NSString stringWithFormat:@"List '%@' cannot be added to a group", listName]);
+
+    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+
+    id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateList:"), list);
+
+    id groupCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateList:"), group);
+
+    id sublistCtxCI = ((id (*)(id, SEL))objc_msgSend)(groupCI, sel_registerName("sublistContext"));
+    if (!sublistCtxCI) errorExit(@"Failed to get sublist context");
+
+    ((void (*)(id, SEL, id))objc_msgSend)(sublistCtxCI, sel_registerName("addListChangeItem:"), listCI);
+
+    NSError *error = nil;
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+        saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    printJSON(@{@"list": listName, @"group": groupName, @"moved": @YES});
+    return 0;
+}
+
+static int cmdRemoveListFromGroup(id store, NSString *listName) {
+    id list = findList(store, listName);
+    if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
+
+    id parentList = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
+    if (!parentList) errorExit([NSString stringWithFormat:@"List '%@' is not in a group", listName]);
+
+    id account = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("account"));
+
+    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+
+    id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateList:"), list);
+
+    id accountCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateAccount:"), account);
+
+    ((void (*)(id, SEL, id))objc_msgSend)(accountCI, sel_registerName("addListChangeItem:"), listCI);
+
+    NSError *error = nil;
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+        saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    printJSON(@{@"list": listName, @"removedFromGroup": @YES});
+    return 0;
+}

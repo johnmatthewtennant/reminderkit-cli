@@ -14,6 +14,7 @@
 static Class REMStoreClass;
 static Class REMSaveRequestClass;
 static Class REMListSectionCIClass;
+static NSString *g_groupFilter = nil;
 
 static void loadFramework(void) {
     [[NSBundle bundleWithPath:@"/System/Library/PrivateFrameworks/ReminderKit.framework"] load];
@@ -119,14 +120,36 @@ static id findList(id store, NSString *name) {
     for (id list in lists) {
         id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
         NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
-        if ([listName isEqualToString:name]) return list;
+        if ([listName isEqualToString:name]) {
+            if (g_groupFilter) {
+                @try {
+                    id parentList = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
+                    if (!parentList) continue;
+                    id pStorage = ((id (*)(id, SEL))objc_msgSend)(parentList, sel_registerName("storage"));
+                    NSString *pName = ((id (*)(id, SEL))objc_msgSend)(pStorage, sel_registerName("name"));
+                    if (![pName isEqualToString:g_groupFilter]) continue;
+                } @catch (NSException *e) { continue; }
+            }
+            return list;
+        }
     }
-    // Normalized fallback: retry with curly quotes normalized to straight quotes
     NSString *normalizedName = normalizeQuotes(name);
+    NSString *normalizedGroup = g_groupFilter ? normalizeQuotes(g_groupFilter) : nil;
     for (id list in lists) {
         id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
         NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
-        if ([normalizeQuotes(listName) isEqualToString:normalizedName]) return list;
+        if ([normalizeQuotes(listName) isEqualToString:normalizedName]) {
+            if (g_groupFilter) {
+                @try {
+                    id parentList = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
+                    if (!parentList) continue;
+                    id pStorage = ((id (*)(id, SEL))objc_msgSend)(parentList, sel_registerName("storage"));
+                    NSString *pName = ((id (*)(id, SEL))objc_msgSend)(pStorage, sel_registerName("name"));
+                    if (![normalizeQuotes(pName) isEqualToString:normalizedGroup]) continue;
+                } @catch (NSException *e) { continue; }
+            }
+            return list;
+        }
     }
     return nil;
 }
@@ -270,6 +293,42 @@ static id requireUniqueReminder(id store, NSString *title, NSString *listName) {
     }
     return matches[0];
 }
+
+// --- Group Helpers ---
+
+static NSArray *getAllAccounts(id store) {
+    NSArray *lists = fetchLists(store);
+    NSMutableArray *accounts = [NSMutableArray array];
+    NSMutableSet *seenIDs = [NSMutableSet set];
+    for (id list in lists) {
+        id account = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("account"));
+        if (!account) continue;
+        id objID = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("objectID"));
+        NSString *idStr = objectIDToString(objID);
+        if (idStr && ![seenIDs containsObject:idStr]) {
+            [seenIDs addObject:idStr];
+            [accounts addObject:account];
+        }
+    }
+    return accounts;
+}
+
+static id getDefaultAccount(id store) {
+    NSArray *accounts = getAllAccounts(store);
+    if (accounts.count == 0) errorExit(@"No accounts found");
+    return accounts[0];
+}
+
+static NSArray *fetchGroupsForAccount(id account) {
+    id groupCtx = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("groupContext"));
+    if (!groupCtx) return @[];
+    NSError *error = nil;
+    NSArray *groups = ((id (*)(id, SEL, id*))objc_msgSend)(
+        groupCtx, sel_registerName("fetchGroupsWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Failed to fetch groups: %@", error]);
+    return groups ?: @[];
+}
+
 
 
 // --- Reminder Serialization (generated from REMINDER_READ_PROPS) ---
@@ -441,7 +500,18 @@ static int cmdLists(id store) {
         id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
         NSString *name = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
         id objID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
-        [result addObject:@{@"name": name ?: @"", @"id": objectIDToString(objID) ?: @""}];
+        NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+        entry[@"name"] = name ?: @"";
+        entry[@"id"] = objectIDToString(objID) ?: @"";
+        @try {
+            id parentList = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
+            if (parentList) {
+                id pStorage = ((id (*)(id, SEL))objc_msgSend)(parentList, sel_registerName("storage"));
+                NSString *pName = ((id (*)(id, SEL))objc_msgSend)(pStorage, sel_registerName("name"));
+                if (pName) entry[@"group"] = pName;
+            }
+        } @catch (NSException *e) {}
+        [result addObject:entry];
     }
     printJSON(result);
     return 0;
@@ -843,10 +913,7 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
 }
 
 static int cmdCreateList(id store, NSString *name) {
-    // Get default account from the first list
-    NSArray *lists = fetchLists(store);
-    if (lists.count == 0) errorExit(@"No accounts found");
-    id account = ((id (*)(id, SEL))objc_msgSend)(lists[0], sel_registerName("account"));
+    id account = getDefaultAccount(store);
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
