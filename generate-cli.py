@@ -107,6 +107,7 @@ def generate_header():
 static Class REMStoreClass;
 static Class REMSaveRequestClass;
 static Class REMListSectionCIClass;
+static NSString *g_groupFilter = nil;
 
 static void loadFramework(void) {
     [[NSBundle bundleWithPath:@"/System/Library/PrivateFrameworks/ReminderKit.framework"] load];
@@ -212,14 +213,36 @@ static id findList(id store, NSString *name) {
     for (id list in lists) {
         id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
         NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
-        if ([listName isEqualToString:name]) return list;
+        if ([listName isEqualToString:name]) {
+            if (g_groupFilter) {
+                @try {
+                    id parentList = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
+                    if (!parentList) continue;
+                    id pStorage = ((id (*)(id, SEL))objc_msgSend)(parentList, sel_registerName("storage"));
+                    NSString *pName = ((id (*)(id, SEL))objc_msgSend)(pStorage, sel_registerName("name"));
+                    if (![pName isEqualToString:g_groupFilter]) continue;
+                } @catch (NSException *e) { continue; }
+            }
+            return list;
+        }
     }
-    // Normalized fallback: retry with curly quotes normalized to straight quotes
     NSString *normalizedName = normalizeQuotes(name);
+    NSString *normalizedGroup = g_groupFilter ? normalizeQuotes(g_groupFilter) : nil;
     for (id list in lists) {
         id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
         NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
-        if ([normalizeQuotes(listName) isEqualToString:normalizedName]) return list;
+        if ([normalizeQuotes(listName) isEqualToString:normalizedName]) {
+            if (g_groupFilter) {
+                @try {
+                    id parentList = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
+                    if (!parentList) continue;
+                    id pStorage = ((id (*)(id, SEL))objc_msgSend)(parentList, sel_registerName("storage"));
+                    NSString *pName = ((id (*)(id, SEL))objc_msgSend)(pStorage, sel_registerName("name"));
+                    if (![normalizeQuotes(pName) isEqualToString:normalizedGroup]) continue;
+                } @catch (NSException *e) { continue; }
+            }
+            return list;
+        }
     }
     return nil;
 }

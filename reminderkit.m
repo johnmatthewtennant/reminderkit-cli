@@ -15,28 +15,28 @@
 static void usage(void) {
     fprintf(stderr, "Usage:\n");
     fprintf(stderr, "  reminderkit lists\n");
-    fprintf(stderr, "  reminderkit list --name <name> [--include-completed] [--has-url] [--tag <tags>] [--exclude-tag <tags>] [--notes-contains <text>]\n");
+    fprintf(stderr, "  reminderkit list --name <name> [--group <group>] [--include-completed] [--has-url] [--tag <tags>] [--exclude-tag <tags>] [--notes-contains <text>]\n");
     fprintf(stderr, "  reminderkit list --all [--include-completed] [--has-url] [--tag <tags>] [--exclude-tag <tags>] [--notes-contains <text>]\n");
-    fprintf(stderr, "  reminderkit search [--title <title>] [--url <url>] [--list <name>] [--tag <tags>] [--exclude-tag <tags>] [--has-url] [--notes-contains <text>]\n");
+    fprintf(stderr, "  reminderkit search [--title <title>] [--url <url>] [--list <name>] [--group <group>] [--tag <tags>] [--exclude-tag <tags>] [--has-url] [--notes-contains <text>]\n");
     fprintf(stderr, "  reminderkit search --id <id>\n");
-    fprintf(stderr, "  reminderkit get [--title <title>] [--url <url>] [--list <name>] [--tag <tags>] [--exclude-tag <tags>] [--has-url] [--notes-contains <text>]  (alias for search)\n");
+    fprintf(stderr, "  reminderkit get [--title <title>] [--url <url>] [--list <name>] [--group <group>] [--tag <tags>] [--exclude-tag <tags>] [--has-url] [--notes-contains <text>]  (alias for search)\n");
     fprintf(stderr, "  reminderkit get --id <id>\n");
-    fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
-    fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
-    fprintf(stderr, "  reminderkit update --id <id> [--title <value>] [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
+    fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>] [--group <group>]\n");
+    fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--group <group>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
+    fprintf(stderr, "  reminderkit update --id <id> [--title <value>] [--list <name>] [--group <group>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
     fprintf(stderr, "  reminderkit complete --id <id>\n");
     fprintf(stderr, "  reminderkit delete --id <id>\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\n");
     fprintf(stderr, "  reminderkit remove-tag --id <id> --tag <tag-name>\n");
     fprintf(stderr, "  reminderkit assign --id <id> --assignee-id <sharee-id>\n");
     fprintf(stderr, "  reminderkit unassign --id <id> [--assignee-id <sharee-id>]  (omit --assignee-id to remove all)\n");
-    fprintf(stderr, "  reminderkit list-sharees --name <list-name>\n");
+    fprintf(stderr, "  reminderkit list-sharees --name <list-name> [--group <group>]\n");
     fprintf(stderr, "  reminderkit link-note --id <id> --note-id <note-id>\n");
-    fprintf(stderr, "  reminderkit list-sections --name <list-name>\n");
-    fprintf(stderr, "  reminderkit create-section --name <list-name> --section <section-name>\n");
+    fprintf(stderr, "  reminderkit list-sections --name <list-name> [--group <group>]\n");
+    fprintf(stderr, "  reminderkit create-section --name <list-name> [--group <group>] --section <section-name>\n");
     fprintf(stderr, "  reminderkit create-list --name <name>\n");
-    fprintf(stderr, "  reminderkit rename-list --old-name <old-name> --new-name <new-name>\n");
-    fprintf(stderr, "  reminderkit delete-list --name <name>\n");
+    fprintf(stderr, "  reminderkit rename-list --old-name <old-name> [--group <group>] --new-name <new-name>\n");
+    fprintf(stderr, "  reminderkit delete-list --name <name> [--group <group>]\n");
     fprintf(stderr, "  reminderkit list-groups\n");
     fprintf(stderr, "  reminderkit create-group --name <name>\n");
     fprintf(stderr, "  reminderkit delete-group --name <name> [--force]\n");
@@ -105,6 +105,12 @@ int main(int argc, const char *argv[]) {
 
         NSString *listName = opts[@"list"];
         id store = getStore();
+
+        if (kwGroup &&
+            ![command isEqualToString:@"move-list-to-group"] &&
+            ![command isEqualToString:@"remove-list-from-group"]) {
+            g_groupFilter = kwGroup;
+        }
 
         // Reject unexpected positional arguments
         if (positional.count > 0 &&

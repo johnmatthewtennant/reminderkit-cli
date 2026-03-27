@@ -1194,9 +1194,75 @@ static int cmdTest(id store) {
         if (!gone2) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
     } else { fprintf(stderr, "  FAIL\n"); failed++; } }
 
+    // --- Group filter (g_groupFilter) tests ---
+    NSString *groupA = @"__remcli_test_group_A__";
+    NSString *groupB = @"__remcli_test_group_B__";
+    NSString *dupListName = @"__remcli_dup_list__";
+
+    // Setup: create groups and lists with unique names, then rename to duplicate
+    cmdCreateGroup(store, groupA);
+    cmdCreateGroup(store, groupB);
+    cmdCreateList(store, @"__remcli_dup_list_1__");
+    cmdMoveListToGroup(store, @"__remcli_dup_list_1__", groupA);
+    cmdCreateList(store, @"__remcli_dup_list_2__");
+    cmdMoveListToGroup(store, @"__remcli_dup_list_2__", groupB);
+    cmdRenameList(store, @"__remcli_dup_list_1__", dupListName);
+    cmdRenameList(store, @"__remcli_dup_list_2__", dupListName);
+
+    // Test 56: g_groupFilter selects list in group A
+    fprintf(stderr, "Test 56: findList with g_groupFilter (group A)...\n");
+    {
+        g_groupFilter = groupA;
+        id listA = findList(store, dupListName);
+        g_groupFilter = nil;
+        if (!listA) { fprintf(stderr, "  FAIL (not found)\n"); failed++; }
+        else {
+            id parentA = ((id (*)(id, SEL))objc_msgSend)(listA, sel_registerName("parentList"));
+            id pStorageA = ((id (*)(id, SEL))objc_msgSend)(parentA, sel_registerName("storage"));
+            NSString *pNameA = ((id (*)(id, SEL))objc_msgSend)(pStorageA, sel_registerName("name"));
+            if ([pNameA isEqualToString:groupA]) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (wrong group: %s)\n", [pNameA UTF8String]); failed++; }
+        }
+    }
+
+    // Test 57: g_groupFilter selects list in group B
+    fprintf(stderr, "Test 57: findList with g_groupFilter (group B)...\n");
+    {
+        g_groupFilter = groupB;
+        id listB = findList(store, dupListName);
+        g_groupFilter = nil;
+        if (!listB) { fprintf(stderr, "  FAIL (not found)\n"); failed++; }
+        else {
+            id parentB = ((id (*)(id, SEL))objc_msgSend)(listB, sel_registerName("parentList"));
+            id pStorageB = ((id (*)(id, SEL))objc_msgSend)(parentB, sel_registerName("storage"));
+            NSString *pNameB = ((id (*)(id, SEL))objc_msgSend)(pStorageB, sel_registerName("name"));
+            if ([pNameB isEqualToString:groupB]) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (wrong group: %s)\n", [pNameB UTF8String]); failed++; }
+        }
+    }
+
+    // Test 58: g_groupFilter with nonexistent group returns nil
+    fprintf(stderr, "Test 58: findList with g_groupFilter (nonexistent)...\n");
+    {
+        g_groupFilter = @"__nonexistent_group_999__";
+        id listNone = findList(store, dupListName);
+        g_groupFilter = nil;
+        if (!listNone) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL (should be nil)\n"); failed++; }
+    }
+
+    // Cleanup: delete dup lists and groups
+    g_groupFilter = groupA;
+    cmdDeleteList(store, dupListName);
+    g_groupFilter = groupB;
+    cmdDeleteList(store, dupListName);
+    g_groupFilter = nil;
+    cmdDeleteGroup(store, groupA, NO);
+    cmdDeleteGroup(store, groupB, NO);
+
     // Cleanup
-    // Test 56: cmdDelete child
-    fprintf(stderr, "Test 56: cmdDelete child...\n");
+    // Test 59: cmdDelete child
+    fprintf(stderr, "Test 59: cmdDelete child...\n");
     {
         id rem38 = findReminder(store, childTitle, testListName);
         NSString *rem38ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem38, sel_registerName("objectID")));
@@ -1204,8 +1270,8 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 57: cmdDelete parent
-    fprintf(stderr, "Test 57: cmdDelete parent...\n");
+    // Test 60: cmdDelete parent
+    fprintf(stderr, "Test 60: cmdDelete parent...\n");
     {
         id rem45 = findReminder(store, parentTitle, testListName);
         NSString *rem45ID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem45, sel_registerName("objectID")));
@@ -1213,8 +1279,8 @@ static int cmdTest(id store) {
         if (r==0) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; }
     }
 
-    // Test 58: cmdDeleteList
-    fprintf(stderr, "Test 58: cmdDeleteList...\n");
+    // Test 61: cmdDeleteList
+    fprintf(stderr, "Test 61: cmdDeleteList...\n");
     { int r = cmdDeleteList(store, testListName); if (r==0) {
         id gone = findList(store, testListName);
         if (!gone) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL (still exists)\n"); failed++; }
