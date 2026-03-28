@@ -103,6 +103,13 @@ int main(int argc, const char *argv[]) {
         // This avoids shell quoting issues with special chars like <, >, ://
         // Only process for add/update commands to avoid blocking stdin on unrelated commands
         if ([command isEqualToString:@"add"] || [command isEqualToString:@"update"]) {
+            // Validate required args before reading stdin to avoid blocking on invalid commands
+            if ([command isEqualToString:@"add"] && !opts[@"title"]) {
+                fprintf(stderr, "Error: --title required\n"); usage(); return 1;
+            }
+            if ([command isEqualToString:@"update"] && (!opts[@"id"] || [opts[@"id"] length] == 0)) {
+                fprintf(stderr, "Error: --id required\n"); usage(); return 1;
+            }
             // Reject using both --notes - and --append-notes - simultaneously
             if ([opts[@"notes"] isEqualToString:@"-"] && [opts[@"append-notes"] isEqualToString:@"-"]) {
                 fprintf(stderr, "Error: cannot use both --notes - and --append-notes - (stdin can only be read once)\n");
