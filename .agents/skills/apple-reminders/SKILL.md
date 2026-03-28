@@ -114,6 +114,23 @@ The `assignments` field appears in reminder JSON output when assignments exist:
 }
 ```
 
+## Reading notes from stdin
+
+Use `--notes -` or `--append-notes -` to read the value from stdin instead of a command-line argument. This avoids shell quoting issues with special characters like `<`, `>`, and `://` that appear in reminder IDs.
+
+```bash
+# Pipe notes content to avoid shell quoting issues
+echo 'blocked_by: 🍄~<x-apple-reminderkit://REMCDReminder/UUID>' | reminderkit update --id "<id>" --append-notes -
+
+# Multiline notes via heredoc piped to stdin
+cat <<'EOF' | reminderkit add --title "My task" --list "List" --notes -
+blocked_by: 🍄~<x-apple-reminderkit://REMCDReminder/UUID>
+session: /path/to/session
+EOF
+```
+
+This is the recommended approach when notes contain reminder IDs or other URL-like strings.
+
 ## `reminderkit --help` (auto-executed)
 
 !`brew list --versions reminderkit-cli && reminderkit help 2>&1 || echo "reminderkit-cli is not installed"`
