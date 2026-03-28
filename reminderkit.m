@@ -22,8 +22,9 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit get [--title <title>] [--url <url>] [--list <name>] [--tag <tags>] [--exclude-tag <tags>] [--has-url] [--notes-contains <text>]  (alias for search)\n");
     fprintf(stderr, "  reminderkit get --id <id>\n");
     fprintf(stderr, "  reminderkit subtasks --title <title> [--list <name>]\n");
-    fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
-    fprintf(stderr, "  reminderkit update --id <id> [--title <value>] [--list <name>] [--notes <value>] [--append-notes <value>] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
+    fprintf(stderr, "  reminderkit add --title <title> [--list <name>] [--notes <value|->] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--parent-id <id>]\n");
+    fprintf(stderr, "  reminderkit update --id <id> [--title <value>] [--list <name>] [--notes <value|->] [--append-notes <value|->] [--completed <value>] [--priority <value>] [--flagged <value>] [--due-date <value>] [--start-date <value>] [--url <value>] [--clear-url] [--remove-parent] [--remove-from-list] [--parent-id <id>] [--to-list <name>]\n");
+    fprintf(stderr, "    (use --notes - or --append-notes - to read from stdin, avoiding shell quoting issues)\n");
     fprintf(stderr, "  reminderkit complete --id <id>\n");
     fprintf(stderr, "  reminderkit delete --id <id>\n");
     fprintf(stderr, "  reminderkit add-tag --id <id> --tag <tag-name>\n");
@@ -97,6 +98,49 @@ int main(int argc, const char *argv[]) {
         NSString *kwNewName = opts[@"new-name"];
 
         NSString *listName = opts[@"list"];
+
+        // Support --notes - and --append-notes - to read from stdin
+        // This avoids shell quoting issues with special chars like <, >, ://
+        // Only process for add/update commands to avoid blocking stdin on unrelated commands
+        if ([command isEqualToString:@"add"] || [command isEqualToString:@"update"]) {
+            // Validate required args before reading stdin to avoid blocking on invalid commands
+            if ([command isEqualToString:@"add"] && !opts[@"title"]) {
+                fprintf(stderr, "Error: --title required\n"); usage(); return 1;
+            }
+            if ([command isEqualToString:@"update"] && (!opts[@"id"] || [opts[@"id"] length] == 0)) {
+                fprintf(stderr, "Error: --id required\n"); usage(); return 1;
+            }
+            // Reject using both --notes - and --append-notes - simultaneously
+            if ([opts[@"notes"] isEqualToString:@"-"] && [opts[@"append-notes"] isEqualToString:@"-"]) {
+                fprintf(stderr, "Error: cannot use both --notes - and --append-notes - (stdin can only be read once)\n");
+                return 1;
+            }
+            for (NSString *stdinFlag in @[@"notes", @"append-notes"]) {
+                if ([opts[stdinFlag] isEqualToString:@"-"]) {
+                    NSFileHandle *input = [NSFileHandle fileHandleWithStandardInput];
+                    NSData *inputData = [input readDataToEndOfFile];
+                    if (inputData.length == 0) {
+                        fprintf(stderr, "Error: --%s - specified but no data on stdin\n", [stdinFlag UTF8String]);
+                        return 1;
+                    }
+                    if (inputData.length > 1024 * 1024) {
+                        fprintf(stderr, "Error: stdin input exceeds 1MB limit\n");
+                        return 1;
+                    }
+                    NSString *stdinStr = [[NSString alloc] initWithData:inputData encoding:NSUTF8StringEncoding];
+                    if (!stdinStr) {
+                        fprintf(stderr, "Error: stdin is not valid UTF-8\n");
+                        return 1;
+                    }
+                    // Trim trailing newline (heredocs/echo add one)
+                    if ([stdinStr hasSuffix:@"\n"]) {
+                        stdinStr = [stdinStr substringToIndex:stdinStr.length - 1];
+                    }
+                    opts[stdinFlag] = stdinStr;
+                }
+            }
+        }
+
         id store = getStore();
 
         // Reject unexpected positional arguments
