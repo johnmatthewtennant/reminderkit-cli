@@ -101,28 +101,36 @@ int main(int argc, const char *argv[]) {
 
         // Support --notes - and --append-notes - to read from stdin
         // This avoids shell quoting issues with special chars like <, >, ://
-        for (NSString *stdinFlag in @[@"notes", @"append-notes"]) {
-            if ([opts[stdinFlag] isEqualToString:@"-"]) {
-                NSFileHandle *input = [NSFileHandle fileHandleWithStandardInput];
-                NSData *inputData = [input readDataToEndOfFile];
-                if (inputData.length == 0) {
-                    fprintf(stderr, "Error: --%s - specified but no data on stdin\n", [stdinFlag UTF8String]);
-                    return 1;
+        // Only process for add/update commands to avoid blocking stdin on unrelated commands
+        if ([command isEqualToString:@"add"] || [command isEqualToString:@"update"]) {
+            // Reject using both --notes - and --append-notes - simultaneously
+            if ([opts[@"notes"] isEqualToString:@"-"] && [opts[@"append-notes"] isEqualToString:@"-"]) {
+                fprintf(stderr, "Error: cannot use both --notes - and --append-notes - (stdin can only be read once)\n");
+                return 1;
+            }
+            for (NSString *stdinFlag in @[@"notes", @"append-notes"]) {
+                if ([opts[stdinFlag] isEqualToString:@"-"]) {
+                    NSFileHandle *input = [NSFileHandle fileHandleWithStandardInput];
+                    NSData *inputData = [input readDataToEndOfFile];
+                    if (inputData.length == 0) {
+                        fprintf(stderr, "Error: --%s - specified but no data on stdin\n", [stdinFlag UTF8String]);
+                        return 1;
+                    }
+                    if (inputData.length > 1024 * 1024) {
+                        fprintf(stderr, "Error: stdin input exceeds 1MB limit\n");
+                        return 1;
+                    }
+                    NSString *stdinStr = [[NSString alloc] initWithData:inputData encoding:NSUTF8StringEncoding];
+                    if (!stdinStr) {
+                        fprintf(stderr, "Error: stdin is not valid UTF-8\n");
+                        return 1;
+                    }
+                    // Trim trailing newline (heredocs/echo add one)
+                    if ([stdinStr hasSuffix:@"\n"]) {
+                        stdinStr = [stdinStr substringToIndex:stdinStr.length - 1];
+                    }
+                    opts[stdinFlag] = stdinStr;
                 }
-                if (inputData.length > 1024 * 1024) {
-                    fprintf(stderr, "Error: stdin input exceeds 1MB limit\n");
-                    return 1;
-                }
-                NSString *stdinStr = [[NSString alloc] initWithData:inputData encoding:NSUTF8StringEncoding];
-                if (!stdinStr) {
-                    fprintf(stderr, "Error: stdin is not valid UTF-8\n");
-                    return 1;
-                }
-                // Trim trailing newline (heredocs/echo add one)
-                if ([stdinStr hasSuffix:@"\n"]) {
-                    stdinStr = [stdinStr substringToIndex:stdinStr.length - 1];
-                }
-                opts[stdinFlag] = stdinStr;
             }
         }
 
