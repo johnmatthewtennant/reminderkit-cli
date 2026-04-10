@@ -129,12 +129,12 @@ static int cmdBatch(id store) {
             // Apply optional properties on the new reminder change item
             if (op[@"notes"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setNotesAsString:"), op[@"notes"]);
             if (op[@"priority"]) ((void (*)(id, SEL, NSUInteger))objc_msgSend)(newRem, sel_registerName("setPriority:"), [op[@"priority"] integerValue]);
-            if (op[@"flagged"]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(newRem, sel_registerName("setFlagged:"), [op[@"flagged"] integerValue]);
+            if (op[@"flagged"]) ((void (*)(id, SEL, BOOL))objc_msgSend)(newRem, sel_registerName("setFlagged:"), parseBoolString(op[@"flagged"]));
             if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));
             if (op[@"start-date"]) ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setStartDateComponents:"), stringToDateComps(op[@"start-date"]));
             if (op[@"url"]) { NSURL *u = [NSURL URLWithString:op[@"url"]]; if (u) { id attCtx = ((id (*)(id, SEL))objc_msgSend)(newRem, sel_registerName("attachmentContext")); ((void (*)(id, SEL, id))objc_msgSend)(attCtx, sel_registerName("setURLAttachmentWithURL:"), u); } }
             if (op[@"completed"]) {
-                BOOL val = [op[@"completed"] isEqualToString:@"true"];
+                BOOL val = parseBoolString(op[@"completed"]);
                 ((void (*)(id, SEL, BOOL))objc_msgSend)(newRem, sel_registerName("setCompleted:"), val);
             }
 
@@ -179,9 +179,9 @@ static int cmdBatch(id store) {
                     ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setNotesAsString:"), op[@"notes"]);
                 }
                 if (op[@"priority"]) ((void (*)(id, SEL, NSUInteger))objc_msgSend)(changeItem, sel_registerName("setPriority:"), [op[@"priority"] integerValue]);
-                if (op[@"flagged"]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(changeItem, sel_registerName("setFlagged:"), [op[@"flagged"] integerValue]);
+                if (op[@"flagged"]) ((void (*)(id, SEL, BOOL))objc_msgSend)(changeItem, sel_registerName("setFlagged:"), parseBoolString(op[@"flagged"]));
                 if (op[@"completed"]) {
-                    BOOL val = [op[@"completed"] isEqualToString:@"true"];
+                    BOOL val = parseBoolString(op[@"completed"]);
                     ((void (*)(id, SEL, BOOL))objc_msgSend)(changeItem, sel_registerName("setCompleted:"), val);
                 }
                 if (op[@"due-date"]) ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setDueDateComponents:"), stringToDateComps(op[@"due-date"]));

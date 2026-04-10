@@ -77,7 +77,7 @@ REMINDER_WRITE_OPS = {
     "notes":        ("setNotesAsString:",       "string"),
     "completed":    ("setCompleted:",           "bool"),
     "priority":     ("setPriority:",            "uint"),
-    "flagged":      ("setFlagged:",             "int"),
+    "flagged":      ("setFlagged:",             "bool"),
     "due-date":     ("setDueDateComponents:",   "datecomps"),
     "start-date":   ("setStartDateComponents:", "datecomps"),
     "url":          (None,                      "url"),  # handled specially
@@ -125,6 +125,11 @@ static id getStore(void) {
 static void errorExit(NSString *msg) {
     fprintf(stderr, "Error: %s\\n", [msg UTF8String]);
     exit(1);
+}
+
+static BOOL parseBoolString(NSString *str) {
+    NSString *lower = [str lowercaseString];
+    return [lower isEqualToString:@"true"] || [lower isEqualToString:@"1"] || [lower isEqualToString:@"yes"];
 }
 
 static NSString *objectIDToString(id objID) {
@@ -1143,7 +1148,7 @@ def generate_update_command():
             lines.append(f'    }}')
         elif arg_type == "bool":
             lines.append(f'    if (opts[@"{flag}"]) {{')
-            lines.append(f'        BOOL val = [opts[@"{flag}"] isEqualToString:@"true"];')
+            lines.append(f'        BOOL val = parseBoolString(opts[@"{flag}"]);')
             lines.append(f'        ((void (*)(id, SEL, BOOL))objc_msgSend)(changeItem, sel_registerName("{setter}"), val);')
             lines.append(f'    }}')
         elif arg_type == "uint":
@@ -1267,7 +1272,7 @@ def generate_add_setters():
             lines.append(f'    }}')
         elif arg_type == "bool":
             lines.append(f'    if (opts[@"{flag}"]) {{')
-            lines.append(f'        BOOL val = [opts[@"{flag}"] isEqualToString:@"true"];')
+            lines.append(f'        BOOL val = parseBoolString(opts[@"{flag}"]);')
             lines.append(f'        ((void (*)(id, SEL, BOOL))objc_msgSend)(newRem, sel_registerName("{setter}"), val);')
             lines.append(f'    }}')
         elif arg_type == "uint":
