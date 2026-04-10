@@ -34,6 +34,11 @@ static void errorExit(NSString *msg) {
     exit(1);
 }
 
+static BOOL parseBoolString(NSString *str) {
+    NSString *lower = [str lowercaseString];
+    return [lower isEqualToString:@"true"] || [lower isEqualToString:@"1"] || [lower isEqualToString:@"yes"];
+}
+
 static NSString *objectIDToString(id objID) {
     if (!objID) return nil;
     return [objID description];
@@ -792,7 +797,7 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
         ((void (*)(id, SEL, id))objc_msgSend)(newRem, sel_registerName("setNotesAsString:"), opts[@"notes"]);
     }
     if (opts[@"completed"]) {
-        BOOL val = [opts[@"completed"] isEqualToString:@"true"];
+        BOOL val = parseBoolString(opts[@"completed"]);
         ((void (*)(id, SEL, BOOL))objc_msgSend)(newRem, sel_registerName("setCompleted:"), val);
     }
     if (opts[@"priority"]) {
@@ -800,8 +805,8 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
         ((void (*)(id, SEL, NSUInteger))objc_msgSend)(newRem, sel_registerName("setPriority:"), val);
     }
     if (opts[@"flagged"]) {
-        NSInteger val = [opts[@"flagged"] integerValue];
-        ((void (*)(id, SEL, NSInteger))objc_msgSend)(newRem, sel_registerName("setFlagged:"), val);
+        BOOL val = parseBoolString(opts[@"flagged"]);
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(newRem, sel_registerName("setFlagged:"), val);
     }
     if (opts[@"due-date"]) {
         NSDateComponents *comps = stringToDateComps(opts[@"due-date"]);
@@ -1082,7 +1087,7 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
         ((void (*)(id, SEL, id))objc_msgSend)(changeItem, sel_registerName("setNotesAsString:"), opts[@"notes"]);
     }
     if (opts[@"completed"]) {
-        BOOL val = [opts[@"completed"] isEqualToString:@"true"];
+        BOOL val = parseBoolString(opts[@"completed"]);
         ((void (*)(id, SEL, BOOL))objc_msgSend)(changeItem, sel_registerName("setCompleted:"), val);
     }
     if (opts[@"priority"]) {
@@ -1090,8 +1095,8 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
         ((void (*)(id, SEL, NSUInteger))objc_msgSend)(changeItem, sel_registerName("setPriority:"), val);
     }
     if (opts[@"flagged"]) {
-        NSInteger val = [opts[@"flagged"] integerValue];
-        ((void (*)(id, SEL, NSInteger))objc_msgSend)(changeItem, sel_registerName("setFlagged:"), val);
+        BOOL val = parseBoolString(opts[@"flagged"]);
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(changeItem, sel_registerName("setFlagged:"), val);
     }
     if (opts[@"due-date"]) {
         NSDateComponents *comps = stringToDateComps(opts[@"due-date"]);
