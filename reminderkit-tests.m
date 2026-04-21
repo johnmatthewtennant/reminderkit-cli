@@ -210,10 +210,12 @@ static int cmdTest(id store) {
                 fprintf(stderr, "  FAIL (not a JSON object)\n"); failed++;
             } else {
                 NSDictionary *dict = json;
-                BOOL ok = dict[@"title"] && dict[@"id"] && dict[@"completed"] != nil
-                    && dict[@"priority"] != nil && dict[@"createdAt"] && dict[@"modifiedAt"];
+                // Default output: completed (false) is omit-when-default; priority=5 is non-default.
+                BOOL ok = dict[@"title"] && dict[@"id"] && dict[@"uri"]
+                    && dict[@"priority"] != nil && dict[@"createdAt"] && dict[@"modifiedAt"]
+                    && dict[@"completed"] == nil;
                 if (ok) { fprintf(stderr, "  PASS\n"); passed++; }
-                else { fprintf(stderr, "  FAIL (missing expected fields)\n"); failed++; }
+                else { fprintf(stderr, "  FAIL (missing expected fields / completed should be omitted)\n"); failed++; }
             }
         }
     }
@@ -309,7 +311,7 @@ static int cmdTest(id store) {
             if (![json isKindOfClass:[NSArray class]]) {
                 fprintf(stderr, "  FAIL (not a JSON array)\n"); failed++;
             } else if (!jsonArrayAllHaveKey(json, @"title") || !jsonArrayAllHaveKey(json, @"id")
-                    || !jsonArrayAllHaveKey(json, @"completed") || !jsonArrayAllHaveKey(json, @"priority")) {
+                    || !jsonArrayAllHaveKey(json, @"uri")) {
                 fprintf(stderr, "  FAIL (not all items have expected fields)\n"); failed++;
             } else if (!jsonArrayFind(json, @"title", parentTitle)) {
                 fprintf(stderr, "  FAIL (parent reminder not found in output)\n"); failed++;
@@ -317,23 +319,24 @@ static int cmdTest(id store) {
         }
     }
 
-    // Test 14: JSON shape
-    fprintf(stderr, "Test 14: JSON shape...\n");
+    // Test 14: JSON shape (default mode — completed omitted, priority present)
+    fprintf(stderr, "Test 14: JSON shape (default mode)...\n");
     {
         id rem = findReminder(store, parentTitle, testListName);
         NSDictionary *dict = reminderToDict(rem);
         BOOL hasTitle = dict[@"title"] != nil;
         BOOL hasNotes = dict[@"notes"] != nil;
         BOOL hasId = dict[@"id"] != nil;
-        BOOL hasCompleted = dict[@"completed"] != nil;
-        BOOL hasPriority = dict[@"priority"] != nil;
+        BOOL hasUri = dict[@"uri"] != nil;
+        BOOL completedOmitted = dict[@"completed"] == nil;  // default false -> omitted
+        BOOL hasPriority = dict[@"priority"] != nil;  // priority=1 (non-default) after Test 5
         BOOL hasCreatedAt = dict[@"createdAt"] != nil;
         BOOL hasModifiedAt = dict[@"modifiedAt"] != nil;
-        if (hasTitle && hasNotes && hasId && hasCompleted && hasPriority && hasCreatedAt && hasModifiedAt) {
+        if (hasTitle && hasNotes && hasId && hasUri && completedOmitted && hasPriority && hasCreatedAt && hasModifiedAt) {
             fprintf(stderr, "  PASS\n"); passed++;
         } else {
-            fprintf(stderr, "  FAIL (missing fields: title=%d notes=%d id=%d completed=%d priority=%d created=%d modified=%d)\n",
-                hasTitle, hasNotes, hasId, hasCompleted, hasPriority, hasCreatedAt, hasModifiedAt); failed++;
+            fprintf(stderr, "  FAIL (title=%d notes=%d id=%d uri=%d completedOmitted=%d priority=%d created=%d modified=%d)\n",
+                hasTitle, hasNotes, hasId, hasUri, completedOmitted, hasPriority, hasCreatedAt, hasModifiedAt); failed++;
         }
     }
 
@@ -1096,6 +1099,167 @@ static int cmdTest(id store) {
                 if (matchHasResults && allContain && noMatchEmpty) { fprintf(stderr, "  PASS\n"); passed++; }
                 else { fprintf(stderr, "  FAIL (match=%lu allContain=%d noMatch=%lu)\n", (unsigned long)[jsonMatch count], allContain, (unsigned long)[jsonNoMatch count]); failed++; }
             }
+        }
+    }
+
+    // --- Ergonomic output tests (ergonomic-output-defaults branch) ---
+
+    // Test: omit-when-default — each default-valued boolean/int is absent from default output.
+    fprintf(stderr, "Test: omit-when-default rules...\n");
+    {
+        // Create a fresh reminder with NO non-default fields set
+        int r = cmdAdd(store, @"__remcli_defaults_test__", testListName, @{});
+        if (r != 0) { fprintf(stderr, "  FAIL (add failed)\n"); failed++; }
+        else {
+            id rem = findReminder(store, @"__remcli_defaults_test__", testListName);
+            gOutputFull = NO; gOutputFields = nil;
+            NSDictionary *d = reminderToDict(rem);
+            BOOL allDayOmitted    = d[@"allDay"] == nil;
+            BOOL completedOmitted = d[@"completed"] == nil;
+            BOOL flaggedOmitted   = d[@"flagged"] == nil;
+            BOOL overdueOmitted   = d[@"isOverdue"] == nil;
+            BOOL recurrentOmitted = d[@"isRecurrent"] == nil;
+            BOOL priorityOmitted  = d[@"priority"] == nil;
+            BOOL hashtagsOmitted  = d[@"hashtags"] == nil;
+            BOOL uriPresent       = d[@"uri"] != nil;
+            BOOL idIsBareUuid     = [d[@"id"] length] == 36 && [d[@"id"] rangeOfString:@"~"].location == NSNotFound;
+            BOOL allOK = allDayOmitted && completedOmitted && flaggedOmitted && overdueOmitted
+                      && recurrentOmitted && priorityOmitted && hashtagsOmitted
+                      && uriPresent && idIsBareUuid;
+            if (allOK) { fprintf(stderr, "  PASS\n"); passed++; }
+            else {
+                fprintf(stderr, "  FAIL (allDay=%d completed=%d flagged=%d overdue=%d recurrent=%d priority=%d hashtags=%d uri=%d idBare=%d)\n",
+                    allDayOmitted, completedOmitted, flaggedOmitted, overdueOmitted, recurrentOmitted,
+                    priorityOmitted, hashtagsOmitted, uriPresent, idIsBareUuid);
+                failed++;
+            }
+            // Cleanup
+            NSString *remID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID")));
+            cmdDelete(store, remID);
+        }
+    }
+
+    // Test: non-default values ARE included.
+    fprintf(stderr, "Test: non-default values included...\n");
+    {
+        int r = cmdAdd(store, @"__remcli_nondefault__", testListName,
+            @{@"notes": @"N", @"priority": @"3", @"flagged": @"true"});
+        if (r != 0) { fprintf(stderr, "  FAIL (add failed)\n"); failed++; }
+        else {
+            id rem = findReminder(store, @"__remcli_nondefault__", testListName);
+            gOutputFull = NO; gOutputFields = nil;
+            NSDictionary *d = reminderToDict(rem);
+            BOOL priorityPresent = [d[@"priority"] integerValue] == 3;
+            BOOL flaggedPresent = [d[@"flagged"] integerValue] != 0;
+            if (priorityPresent && flaggedPresent) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (priority=%s flagged=%s)\n", [[d[@"priority"] description] UTF8String] ?: "nil", [[d[@"flagged"] description] UTF8String] ?: "nil"); failed++; }
+            NSString *remID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID")));
+            cmdDelete(store, remID);
+        }
+    }
+
+    // Test: --fields projection returns only listed fields, preserving order.
+    fprintf(stderr, "Test: --fields projection...\n");
+    {
+        int r = cmdAdd(store, @"__remcli_fields_test__", testListName, @{@"notes": @"N"});
+        if (r != 0) { fprintf(stderr, "  FAIL (add failed)\n"); failed++; }
+        else {
+            id rem = findReminder(store, @"__remcli_fields_test__", testListName);
+            gOutputFields = @[@"title", @"id", @"notes"];
+            gOutputFull = NO;
+            NSDictionary *d = reminderToDict(rem);
+            NSArray *order = d[@"__fieldOrder__"];
+            BOOL okFields = d[@"title"] && d[@"id"] && d[@"notes"] && !d[@"uri"] && !d[@"createdAt"];
+            BOOL okOrder = [order isEqualToArray:@[@"title", @"id", @"notes"]];
+            gOutputFields = nil;
+            if (okFields && okOrder) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (fields=%d order=%d got=%s)\n", okFields, okOrder, [[order description] UTF8String]); failed++; }
+            NSString *remID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID")));
+            cmdDelete(store, remID);
+        }
+    }
+
+    // Test: UUID input accepted in various casings / wrapped forms.
+    fprintf(stderr, "Test: UUID input normalization (casings + legacy)...\n");
+    {
+        int r = cmdAdd(store, @"__remcli_uuid_input__", testListName, @{});
+        if (r != 0) { fprintf(stderr, "  FAIL (add failed)\n"); failed++; }
+        else {
+            id rem = findReminder(store, @"__remcli_uuid_input__", testListName);
+            id objID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));
+            NSString *upper = objectIDToUUID(objID);
+            NSString *lower = [upper lowercaseString];
+            NSString *mixed = [NSString stringWithFormat:@"%@%@",
+                [upper substringToIndex:upper.length/2],
+                [[upper substringFromIndex:upper.length/2] lowercaseString]];
+            NSString *legacy = objectIDToString(objID);  // full emoji form
+            NSString *uri = objectIDToURI(objID);        // x-apple-reminderkit:// form
+            BOOL okUpper  = findReminderByID(store, upper)  != nil;
+            BOOL okLower  = findReminderByID(store, lower)  != nil;
+            BOOL okMixed  = findReminderByID(store, mixed)  != nil;
+            BOOL okLegacy = findReminderByID(store, legacy) != nil;
+            BOOL okUri    = findReminderByID(store, uri)    != nil;
+            if (okUpper && okLower && okMixed && okLegacy && okUri) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (upper=%d lower=%d mixed=%d legacy=%d uri=%d)\n",
+                okUpper, okLower, okMixed, okLegacy, okUri); failed++; }
+            cmdDelete(store, upper);
+        }
+    }
+
+    // Test: --full mode emits all fields plus legacy id + new uuid key.
+    fprintf(stderr, "Test: --full output shape...\n");
+    {
+        int r = cmdAdd(store, @"__remcli_full_test__", testListName, @{});
+        if (r != 0) { fprintf(stderr, "  FAIL (add failed)\n"); failed++; }
+        else {
+            id rem = findReminder(store, @"__remcli_full_test__", testListName);
+            gOutputFull = YES; gOutputFields = nil;
+            NSDictionary *d = reminderToDict(rem);
+            BOOL hasLegacyID = [d[@"id"] containsString:@"x-apple-reminderkit://"];  // emoji+URL form
+            BOOL hasUuid = d[@"uuid"] != nil;
+            BOOL hasDefaults = d[@"completed"] != nil && d[@"priority"] != nil && d[@"flagged"] != nil;
+            BOOL noUri = d[@"uri"] == nil;  // --full suppresses uri for byte-compat
+            BOOL hasLegacyListID = [d[@"listID"] length] > 0;
+            gOutputFull = NO;
+            if (hasLegacyID && hasUuid && hasDefaults && noUri && hasLegacyListID) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (legacyID=%d uuid=%d defaults=%d noUri=%d listID=%d)\n",
+                hasLegacyID, hasUuid, hasDefaults, noUri, hasLegacyListID); failed++; }
+            NSString *remID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID")));
+            cmdDelete(store, remID);
+        }
+    }
+
+    // Test: Round-trip integration — add → get by bare UUID → append-notes → complete → delete.
+    fprintf(stderr, "Test: round-trip with bare UUID...\n");
+    {
+        NSString *rtTitle = @"__remcli_roundtrip__";
+        int r1 = cmdAdd(store, rtTitle, testListName, @{@"notes": @"initial"});
+        if (r1 != 0) { fprintf(stderr, "  FAIL (add)\n"); failed++; }
+        else {
+            id rem = findReminder(store, rtTitle, testListName);
+            NSString *uuid = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID")));
+            // get by bare UUID
+            __block int rGet = -1;
+            NSData *gotData = captureStdout(^{ rGet = cmdGetByID(store, uuid); });
+            id got = parseJSONFromData(gotData);
+            BOOL okGet = rGet == 0 && [got isKindOfClass:[NSDictionary class]]
+                && [((NSDictionary *)got)[@"id"] isEqualToString:uuid];
+            // append notes by bare UUID
+            int r2 = cmdUpdate(store, testListName, @{@"id": uuid, @"append-notes": @"more"});
+            id rem2 = findReminderByID(store, uuid);
+            NSString *notes = ((id (*)(id, SEL))objc_msgSend)(rem2, sel_registerName("notesAsString"));
+            BOOL okAppend = r2 == 0 && [notes containsString:@"initial"] && [notes containsString:@"more"];
+            // complete by bare UUID
+            int r3 = cmdComplete(store, uuid);
+            id rem3 = findReminderByID(store, uuid);
+            BOOL isDone = ((BOOL (*)(id, SEL))objc_msgSend)(rem3, sel_registerName("isCompleted"));
+            BOOL okComplete = r3 == 0 && isDone;
+            // delete by bare UUID
+            int r4 = cmdDelete(store, uuid);
+            BOOL okDelete = r4 == 0 && findReminderByID(store, uuid) == nil;
+            if (okGet && okAppend && okComplete && okDelete) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (get=%d append=%d complete=%d delete=%d)\n",
+                okGet, okAppend, okComplete, okDelete); failed++; }
         }
     }
 

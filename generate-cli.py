@@ -46,6 +46,15 @@ MAINTENANCE:
 # Maps property name -> (json_key, type_hint)
 # type_hint: "string", "bool", "int", "uint", "date", "objid", "set_hashtags", "datecomps"
 # Note: "url" is read via attachmentContext, not icsUrl
+#
+# Omit-when-default: fields whose default (zero/false/empty) value is suppressed
+# from the output dict unless --full is passed. This is the "smart defaults"
+# contract consumed by scripts; see CONTRACT.md.
+#
+# The "objid" type is split into two emitted fields: "<jsonKey>" (bare UUID)
+# and "<jsonKey>Uri"/"uri" (x-apple-reminderkit:// URL). For the main object
+# the keys are literally "id" + "uri"; for referenced objects (listID, parent)
+# we use "<camelCase>Id" + "<camelCase>Uri" to avoid key collisions.
 REMINDER_READ_PROPS = {
     "titleAsString":      ("title",          "string"),
     "notesAsString":      ("notes",          "string"),
@@ -55,9 +64,9 @@ REMINDER_READ_PROPS = {
     "allDay":             ("allDay",         "bool"),
     "isOverdue":          ("isOverdue",      "bool"),
     "isRecurrent":        ("isRecurrent",    "bool"),
-    "objectID":           ("id",             "objid"),
-    "listID":             ("listID",         "objid"),
-    "parentReminderID":   ("parentID",       "objid"),
+    "objectID":           ("id",             "objid_self"),
+    "listID":             ("listId",         "objid_ref"),
+    "parentReminderID":   ("parentId",       "objid_ref"),
     "dueDateComponents":  ("dueDate",        "datecomps"),
     "startDateComponents":("startDate",      "datecomps"),
     "creationDate":       ("createdAt",      "date"),
@@ -66,6 +75,18 @@ REMINDER_READ_PROPS = {
     "hashtags":           ("hashtags",       "set_hashtags"),
     "timeZone":           ("timeZone",       "string"),
     "assignmentContext":  ("assignments",    "assignment_context"),
+}
+
+# Fields to omit from default output when they hold their default/zero value.
+# (All set of json keys — applied in reminderToDict.)
+OMIT_WHEN_DEFAULT = {
+    "allDay",       # false
+    "completed",    # false
+    "flagged",      # 0
+    "isOverdue",    # false
+    "isRecurrent",  # false
+    "priority",     # 0
+    "hashtags",     # empty array (already suppressed but documented)
 }
 
 # Setters to expose on REMReminderChangeItem (write via update command)
@@ -137,6 +158,135 @@ static NSString *objectIDToString(id objID) {
     return [objID description];
 }
 
+// --- ID Output Mode (omit-when-default, field projection, full mode) ---
+// Populated from CLI flags in main(). Shared by reminderToDict + helpers.
+static BOOL gOutputFull = NO;               // --full
+static NSArray *gOutputFields = nil;        // --fields id,title,notes,...
+static BOOL gOutputLegacyID = NO;           // batch results keep old id format
+
+// NSManagedObjectID description looks like:
+//   "🎅~<x-apple-reminderkit://REMCDReminder/706D8583-A718-4644-9056-E79D9C8E9625>"
+// Extract the canonical x-callback-url form (no emoji, no angle brackets).
+static NSString *objectIDToURI(id objID) {
+    if (!objID) return nil;
+    NSString *desc = [objID description];
+    if (!desc) return nil;
+    // Find the first '<' and the matching '>' at the end.
+    NSRange lt = [desc rangeOfString:@"<"];
+    NSRange gt = [desc rangeOfString:@">" options:NSBackwardsSearch];
+    if (lt.location != NSNotFound && gt.location != NSNotFound && gt.location > lt.location) {
+        return [desc substringWithRange:NSMakeRange(lt.location + 1, gt.location - lt.location - 1)];
+    }
+    // Fallback: if the string already starts with the scheme, return as-is.
+    if ([desc hasPrefix:@"x-apple-reminderkit://"]) return desc;
+    return desc;
+}
+
+// Extract the bare UUID (last path component) from an NSManagedObjectID.
+// Returns nil if no UUID-shaped token is found.
+static NSString *objectIDToUUID(id objID) {
+    if (!objID) return nil;
+    NSString *uri = objectIDToURI(objID);
+    if (!uri) return nil;
+    NSArray *parts = [uri componentsSeparatedByString:@"/"];
+    if (parts.count == 0) return nil;
+    NSString *tail = [parts lastObject];
+    // Strip any stray trailing '>' just in case.
+    if ([tail hasSuffix:@">"]) tail = [tail substringToIndex:tail.length - 1];
+    // Validate UUID shape (36 chars with dashes).
+    if (tail.length == 36 && [tail characterAtIndex:8] == '-') return [tail uppercaseString];
+    return nil;
+}
+
+// Build the full legacy id string (with emoji prefix) from an NSManagedObjectID.
+// This is the exact byte-for-byte representation scripts using pre-v2 output
+// would see. Only used in --full mode for the "id" field.
+static NSString *objectIDToLegacyString(id objID) {
+    return objectIDToString(objID);
+}
+
+// Accept either a bare UUID or any form that contains one ("706D...", the full
+// emoji-URL wrapped form, the naked x-apple-reminderkit:// URL, etc.). Returns
+// the uppercased bare UUID, or nil if the input doesn't look like one.
+static NSString *normalizeIDInput(NSString *input) {
+    if (!input || input.length == 0) return nil;
+    // If the whole input is already a UUID, short-circuit.
+    if (input.length == 36 && [input characterAtIndex:8] == '-') {
+        return [input uppercaseString];
+    }
+    // Otherwise scan for a UUID-shaped token (36 chars, dash positions 8/13/18/23).
+    NSCharacterSet *hex = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF-"];
+    NSUInteger n = input.length;
+    for (NSUInteger i = 0; i + 36 <= n; i++) {
+        BOOL ok = YES;
+        for (NSUInteger j = 0; j < 36; j++) {
+            unichar c = [input characterAtIndex:i + j];
+            if (![hex characterIsMember:c]) { ok = NO; break; }
+            if ((j == 8 || j == 13 || j == 18 || j == 23) && c != '-') { ok = NO; break; }
+            if (j != 8 && j != 13 && j != 18 && j != 23 && c == '-') { ok = NO; break; }
+        }
+        if (ok) return [[input substringWithRange:NSMakeRange(i, 36)] uppercaseString];
+    }
+    return nil;
+}
+
+// Add a key to a shaped dict's field order (used when callers add new keys
+// after shaping, e.g. subtasks, listName). No-op if not a shaped dict.
+static void addFieldIfRequested(NSMutableDictionary *dict, NSString *key, id value) {
+    if (!value) return;
+    if (gOutputFields && gOutputFields.count > 0) {
+        if (![gOutputFields containsObject:key]) return;  // not requested, drop
+        dict[key] = value;
+        NSMutableArray *order = dict[@"__fieldOrder__"];
+        if ([order isKindOfClass:[NSMutableArray class]] && ![order containsObject:key]) {
+            [order addObject:key];
+        }
+        return;
+    }
+    dict[key] = value;
+}
+
+// --- Field projection helper ---
+// Apply gOutputFields / gOutputFull / OMIT_WHEN_DEFAULT to a fully-populated dict.
+// When gOutputFields is set we return an ordered dict containing only the requested
+// keys (preserving user-specified order, values taken from src).
+// When gOutputFull is NO and gOutputFields is nil, we apply the omit-when-default rules.
+// Omit-when-default rules (only relevant when --full is NOT set):
+//   allDay=false, completed=false, flagged=0, isOverdue=false,
+//   isRecurrent=false, priority=0, hashtags=[]
+static id applyOutputShape(NSDictionary *src) {
+    // --fields takes precedence over --full
+    if (gOutputFields && gOutputFields.count > 0) {
+        // Preserve order via a plain NSMutableDictionary plus a sibling order array
+        // that printJSON's sortedKeys would otherwise destroy. We therefore use
+        // NSJSONWritingSortedKeys=NO and build an NSMutableDictionary that the
+        // printer renders in insertion order. See printJSON below.
+        NSMutableDictionary *out = [NSMutableDictionary dictionary];
+        NSMutableArray *order = [NSMutableArray array];
+        for (NSString *field in gOutputFields) {
+            id v = src[field];
+            if (v) {
+                out[field] = v;
+                [order addObject:field];
+            }
+        }
+        out[@"__fieldOrder__"] = order;  // printer reads and strips this
+        return out;
+    }
+    if (gOutputFull) return src;  // all fields including defaults
+
+    // Default: omit-when-default
+    NSMutableDictionary *out = [src mutableCopy];
+    if ([out[@"allDay"] isKindOfClass:[NSNumber class]] && ![out[@"allDay"] boolValue]) [out removeObjectForKey:@"allDay"];
+    if ([out[@"completed"] isKindOfClass:[NSNumber class]] && ![out[@"completed"] boolValue]) [out removeObjectForKey:@"completed"];
+    if ([out[@"isOverdue"] isKindOfClass:[NSNumber class]] && ![out[@"isOverdue"] boolValue]) [out removeObjectForKey:@"isOverdue"];
+    if ([out[@"isRecurrent"] isKindOfClass:[NSNumber class]] && ![out[@"isRecurrent"] boolValue]) [out removeObjectForKey:@"isRecurrent"];
+    if ([out[@"priority"] isKindOfClass:[NSNumber class]] && [out[@"priority"] integerValue] == 0) [out removeObjectForKey:@"priority"];
+    if ([out[@"flagged"] isKindOfClass:[NSNumber class]] && [out[@"flagged"] integerValue] == 0) [out removeObjectForKey:@"flagged"];
+    if ([out[@"hashtags"] isKindOfClass:[NSArray class]] && [(NSArray *)out[@"hashtags"] count] == 0) [out removeObjectForKey:@"hashtags"];
+    return out;
+}
+
 static NSString *dateToISO(NSDate *date) {
     if (!date) return nil;
     NSISO8601DateFormatter *fmt = [[NSISO8601DateFormatter alloc] init];
@@ -180,7 +330,140 @@ static NSString *normalizeQuotes(NSString *str) {
     return result;
 }
 
+// Strip any internal "__fieldOrder__" markers from a JSON-ready structure.
+// Returns a new object tree. Used by printJSON before serialisation.
+static id stripFieldOrderMarkers(id obj) {
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *src = obj;
+        NSMutableDictionary *dst = [NSMutableDictionary dictionary];
+        for (NSString *k in src) {
+            if ([k isEqualToString:@"__fieldOrder__"]) continue;
+            dst[k] = stripFieldOrderMarkers(src[k]);
+        }
+        return dst;
+    }
+    if ([obj isKindOfClass:[NSArray class]]) {
+        NSMutableArray *dst = [NSMutableArray array];
+        for (id e in obj) [dst addObject:stripFieldOrderMarkers(e)];
+        return dst;
+    }
+    return obj;
+}
+
+// Serialize JSON manually when any top-level or nested dict has a
+// __fieldOrder__ marker, so we can preserve insertion order. Otherwise
+// fall back to NSJSONSerialization (sorted keys for stability).
+static NSString *jsonIndent(NSUInteger lvl) {
+    NSMutableString *s = [NSMutableString string];
+    for (NSUInteger i = 0; i < lvl; i++) [s appendString:@"  "];
+    return s;
+}
+
+// Return the JSON-escaped string body (INCLUDING surrounding quotes).
+// Example: jsonEscapeQuoted(@"he\\"llo") -> "\\"he\\\\\\"llo\\""
+static NSString *jsonEscapeQuoted(NSString *s) {
+    NSError *e = nil;
+    NSData *d = [NSJSONSerialization dataWithJSONObject:@[s] options:0 error:&e];
+    if (!d) return @"\\"\\"";
+    NSString *full = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+    // full looks like ["..."], strip the outer brackets only
+    if (full.length >= 4) return [full substringWithRange:NSMakeRange(1, full.length - 2)];
+    return @"\\"\\"";
+}
+
+static void jsonWriteValue(NSMutableString *out, id v, NSUInteger lvl, BOOL hasOrder);
+
+static void jsonWriteDict(NSMutableString *out, NSDictionary *d, NSUInteger lvl, BOOL hasOrder) {
+    NSArray *keys;
+    NSArray *orderMarker = d[@"__fieldOrder__"];
+    if ([orderMarker isKindOfClass:[NSArray class]]) {
+        keys = orderMarker;
+    } else {
+        // Sort keys for stability, matching NSJSONWritingSortedKeys.
+        keys = [[d allKeys] sortedArrayUsingSelector:@selector(compare:)];
+    }
+    if (keys.count == 0) { [out appendString:@"{\\n\\n"]; [out appendString:jsonIndent(lvl)]; [out appendString:@"}"]; return; }
+    [out appendString:@"{\\n"];
+    NSUInteger idx = 0;
+    for (NSString *k in keys) {
+        if ([k isEqualToString:@"__fieldOrder__"]) continue;
+        id v = d[k];
+        if (!v) continue;
+        [out appendString:jsonIndent(lvl + 1)];
+        [out appendString:jsonEscapeQuoted(k)];
+        [out appendString:@" : "];
+        jsonWriteValue(out, v, lvl + 1, hasOrder);
+        // We don't easily know if there's a next key; append comma+newline unconditionally
+        // and strip the trailing ,\\n below.
+        [out appendString:@",\\n"];
+        idx++;
+    }
+    // Strip trailing ",\\n"
+    if (idx > 0 && [out hasSuffix:@",\\n"]) [out deleteCharactersInRange:NSMakeRange(out.length - 2, 2)];
+    [out appendString:@"\\n"];
+    [out appendString:jsonIndent(lvl)];
+    [out appendString:@"}"];
+}
+
+static void jsonWriteArray(NSMutableString *out, NSArray *a, NSUInteger lvl, BOOL hasOrder) {
+    if (a.count == 0) { [out appendString:@"[]"]; return; }
+    [out appendString:@"[\\n"];
+    for (NSUInteger i = 0; i < a.count; i++) {
+        [out appendString:jsonIndent(lvl + 1)];
+        jsonWriteValue(out, a[i], lvl + 1, hasOrder);
+        if (i + 1 < a.count) [out appendString:@","];
+        [out appendString:@"\\n"];
+    }
+    [out appendString:jsonIndent(lvl)];
+    [out appendString:@"]"];
+}
+
+static void jsonWriteValue(NSMutableString *out, id v, NSUInteger lvl, BOOL hasOrder) {
+    if ([v isKindOfClass:[NSDictionary class]]) { jsonWriteDict(out, v, lvl, hasOrder); return; }
+    if ([v isKindOfClass:[NSArray class]]) { jsonWriteArray(out, v, lvl, hasOrder); return; }
+    if ([v isKindOfClass:[NSString class]]) {
+        [out appendString:jsonEscapeQuoted(v)];
+        return;
+    }
+    if ([v isKindOfClass:[NSNumber class]]) {
+        NSNumber *n = v;
+        // Objective-C: @YES/@NO are NSNumbers; detect via objCType.
+        const char *t = [n objCType];
+        if (t[0] == 'c' || t[0] == 'B') { [out appendString:[n boolValue] ? @"true" : @"false"]; return; }
+        [out appendString:[n stringValue]];
+        return;
+    }
+    if (v == [NSNull null] || !v) { [out appendString:@"null"]; return; }
+    // Fallback: serialize via NSJSONSerialization in a wrapper array.
+    NSError *e = nil;
+    NSData *d = [NSJSONSerialization dataWithJSONObject:@[v] options:0 error:&e];
+    if (d) {
+        NSString *s = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+        if (s.length >= 2) { [out appendString:[s substringWithRange:NSMakeRange(1, s.length - 2)]]; return; }
+    }
+    [out appendString:@"null"];
+}
+
+// Recursively walk and set hasOrder=YES if any dict has __fieldOrder__.
+static BOOL hasFieldOrderMarker(id obj) {
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        if (((NSDictionary *)obj)[@"__fieldOrder__"]) return YES;
+        for (id v in [(NSDictionary *)obj allValues]) {
+            if (hasFieldOrderMarker(v)) return YES;
+        }
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        for (id v in (NSArray *)obj) if (hasFieldOrderMarker(v)) return YES;
+    }
+    return NO;
+}
+
 static void printJSON(id obj) {
+    if (hasFieldOrderMarker(obj)) {
+        NSMutableString *out = [NSMutableString string];
+        jsonWriteValue(out, obj, 0, YES);
+        printf("%s\\n", [out UTF8String]);
+        return;
+    }
     NSError *error = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
         options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:&error];
@@ -339,11 +622,18 @@ static NSArray *findRemindersByURL(id store, NSString *url, NSString *listName) 
 }
 
 static id findReminderByID(id store, NSString *idString) {
+    if (!idString) return nil;
+    // Accept EITHER a bare UUID or any form that contains one (emoji-URL
+    // wrapped, naked scheme URL, etc.). We normalize both sides.
+    NSString *normalizedInput = normalizeIDInput(idString);
     NSArray *lists = fetchLists(store);
     for (id list in lists) {
         NSArray *rems = fetchReminders(store, list, YES);
         for (id rem in rems) {
             id objID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));
+            NSString *uuid = objectIDToUUID(objID);
+            if (normalizedInput && uuid && [uuid isEqualToString:normalizedInput]) return rem;
+            // Fallback for legacy exact-match (emoji-URL form or scheme URL)
             NSString *idStr = objectIDToString(objID);
             if (idStr && [idStr isEqualToString:idString]) return rem;
         }
@@ -374,7 +664,7 @@ static id requireUniqueReminder(id store, NSString *title, NSString *listName) {
 def generate_reminder_to_dict():
     """Generate the reminderToDict function from REMINDER_READ_PROPS."""
     lines = [
-        'static NSDictionary *reminderToDict(id rem) {',
+        'static NSMutableDictionary *reminderToDict(id rem) {',
         '    NSMutableDictionary *dict = [NSMutableDictionary dictionary];',
         '',
     ]
@@ -405,6 +695,45 @@ def generate_reminder_to_dict():
             lines.append(f'    @try {{')
             lines.append(f'        NSInteger val_{json_key} = ((NSInteger (*)(id, SEL))objc_msgSend)(rem, sel_registerName("{sel}"));')
             lines.append(f'        dict[@"{json_key}"] = @(val_{json_key});')
+            lines.append(f'    }} @catch (NSException *e) {{}}')
+        elif type_hint == "objid_self":
+            # In default (v2) mode: bare UUID under "id", new "uri" field with scheme URL.
+            # In --full mode: exact legacy bytes under "id" (emoji-wrapped form) + new
+            # "uuid" field with bare UUID. Suppress "uri" in --full for byte-compat.
+            lines.append(f'    @try {{')
+            lines.append(f'        id val_{json_key} = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("{sel}"));')
+            lines.append(f'        if (val_{json_key}) {{')
+            lines.append(f'            if (gOutputFull) {{')
+            lines.append(f'                dict[@"{json_key}"] = objectIDToLegacyString(val_{json_key});')
+            lines.append(f'                NSString *_uuid = objectIDToUUID(val_{json_key});')
+            lines.append(f'                if (_uuid) dict[@"uuid"] = _uuid;')
+            lines.append(f'            }} else {{')
+            lines.append(f'                NSString *_uuid = objectIDToUUID(val_{json_key});')
+            lines.append(f'                dict[@"{json_key}"] = _uuid ?: objectIDToString(val_{json_key});')
+            lines.append(f'                NSString *_uri = objectIDToURI(val_{json_key});')
+            lines.append(f'                if (_uri) dict[@"uri"] = _uri;')
+            lines.append(f'            }}')
+            lines.append(f'        }}')
+            lines.append(f'    }} @catch (NSException *e) {{}}')
+        elif type_hint == "objid_ref":
+            # In default (v2) mode: bare UUID under "<key>Id" + x-callback URL under "<key>Uri".
+            # In --full mode: legacy emoji form under the original "<key>ID" key (byte-compat),
+            # no Uri, no Id suffix field.
+            base = json_key[:-2] if json_key.endswith("Id") else json_key
+            uri_key = base + "Uri"
+            legacy_key = base + "ID"  # pre-v2 camelCase was listID / parentID
+            lines.append(f'    @try {{')
+            lines.append(f'        id val_{json_key} = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("{sel}"));')
+            lines.append(f'        if (val_{json_key}) {{')
+            lines.append(f'            if (gOutputFull) {{')
+            lines.append(f'                dict[@"{legacy_key}"] = objectIDToLegacyString(val_{json_key});')
+            lines.append(f'            }} else {{')
+            lines.append(f'                NSString *_uuid = objectIDToUUID(val_{json_key});')
+            lines.append(f'                dict[@"{json_key}"] = _uuid ?: objectIDToString(val_{json_key});')
+            lines.append(f'                NSString *_uri = objectIDToURI(val_{json_key});')
+            lines.append(f'                if (_uri) dict[@"{uri_key}"] = _uri;')
+            lines.append(f'            }}')
+            lines.append(f'        }}')
             lines.append(f'    }} @catch (NSException *e) {{}}')
         elif type_hint == "objid":
             lines.append(f'    @try {{')
@@ -491,7 +820,11 @@ def generate_reminder_to_dict():
     lines.append('    } @catch (NSException *e) {}')
     lines.append('')
 
-    lines.append('    return dict;')
+    lines.append('    // Apply --fields / --full / omit-when-default shaping before returning.')
+    lines.append('    id shaped = applyOutputShape(dict);')
+    lines.append('    if ([shaped isKindOfClass:[NSMutableDictionary class]]) return (NSMutableDictionary *)shaped;')
+    lines.append('    NSMutableDictionary *m = [shaped mutableCopy];')
+    lines.append('    return m;')
     lines.append('}')
     return '\n'.join(lines)
 
@@ -508,7 +841,22 @@ static int cmdLists(id store) {
         id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
         NSString *name = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
         id objID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
-        [result addObject:@{@"name": name ?: @"", @"id": objectIDToString(objID) ?: @""}];
+        NSMutableDictionary *d = [NSMutableDictionary dictionary];
+        if (name) d[@"name"] = name;
+        if (objID) {
+            if (gOutputFull) {
+                // Exact legacy bytes for byte-compat, plus "uuid" as a new addition.
+                d[@"id"] = objectIDToLegacyString(objID) ?: @"";
+                NSString *uuid = objectIDToUUID(objID);
+                if (uuid) d[@"uuid"] = uuid;
+            } else {
+                NSString *uuid = objectIDToUUID(objID);
+                d[@"id"] = uuid ?: (objectIDToString(objID) ?: @"");
+                NSString *uri = objectIDToURI(objID);
+                if (uri) d[@"uri"] = uri;
+            }
+        }
+        [result addObject:(NSDictionary *)applyOutputShape(d)];
     }
     printJSON(result);
     return 0;
@@ -608,7 +956,7 @@ static int cmdListAll(id store, BOOL includeCompleted, NSString *tagFilter, NSSt
                 } @catch (NSException *e) { continue; }
             }
             NSMutableDictionary *dict = [reminderToDict(rem) mutableCopy];
-            dict[@"listName"] = name ?: @"";
+            addFieldIfRequested(dict, @"listName", name ?: @"");
             [result addObject:dict];
         }
     }
@@ -638,7 +986,7 @@ static int cmdGetByID(id store, NSString *remID) {
             [subtasks addObject:reminderToDict(sub)];
         }
     }
-    if (subtasks.count > 0) dict[@"subtasks"] = subtasks;
+    if (subtasks.count > 0) addFieldIfRequested(dict, @"subtasks", subtasks);
 
     printJSON(dict);
     return 0;
@@ -753,7 +1101,7 @@ static int cmdGet(id store, NSString *title, NSString *listName, NSString *urlFi
                     [subtasks addObject:reminderToDict(sub)];
                 }
             }
-            if (subtasks.count > 0) dict[@"subtasks"] = subtasks;
+            if (subtasks.count > 0) addFieldIfRequested(dict, @"subtasks", subtasks);
         }
 
         [resultArray addObject:dict];
@@ -1040,7 +1388,18 @@ static int cmdListSections(id store, NSString *listName) {
                 id objID = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("objectID"));
                 NSMutableDictionary *d = [NSMutableDictionary dictionary];
                 if (name) d[@"name"] = name;
-                if (objID) d[@"id"] = objectIDToString(objID);
+                if (objID) {
+                    if (gOutputFull) {
+                        d[@"id"] = objectIDToLegacyString(objID) ?: @"";
+                        NSString *uuid = objectIDToUUID(objID);
+                        if (uuid) d[@"uuid"] = uuid;
+                    } else {
+                        NSString *uuid = objectIDToUUID(objID);
+                        d[@"id"] = uuid ?: (objectIDToString(objID) ?: @"");
+                        NSString *uri = objectIDToURI(objID);
+                        if (uri) d[@"uri"] = uri;
+                    }
+                }
                 [result addObject:d];
             }
         }
@@ -1616,6 +1975,11 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit rename-list --old-name <old-name> --new-name <new-name>\\n");
     fprintf(stderr, "  reminderkit delete-list --name <name>\\n");
     fprintf(stderr, "  reminderkit batch  (reads JSON array from stdin)\\n");
+    fprintf(stderr, "\\n  Output shaping (applies to any command that returns JSON):\\n");
+    fprintf(stderr, "    --fields <csv>      comma-separated list of fields to emit (preserves order)\\n");
+    fprintf(stderr, "    --full              emit all fields including default-valued ones; use legacy emoji id\\n");
+    fprintf(stderr, "                        (default: omit default-valued fields; emit bare-UUID id + uri)\\n");
+    fprintf(stderr, "  IDs: --id accepts either a bare UUID or the full x-apple-reminderkit:// form\\n");
     fprintf(stderr, "\\n  Skill management:\\n");
     fprintf(stderr, "  reminderkit install-skill [--claude] [--agents] [--force]\\n");
     fprintf(stderr, "\\n  Testing:\\n");
@@ -1655,7 +2019,8 @@ int main(int argc, const char *argv[]) {
                     [flag isEqualToString:@"all"] ||
                     [flag isEqualToString:@"claude"] ||
                     [flag isEqualToString:@"agents"] ||
-                    [flag isEqualToString:@"force"]) {
+                    [flag isEqualToString:@"force"] ||
+                    [flag isEqualToString:@"full"]) {
                     if ([flag isEqualToString:@"include-completed"]) includeCompleted = YES;
                     if ([flag isEqualToString:@"has-url"]) hasURL = YES;
                     opts[flag] = @"true";

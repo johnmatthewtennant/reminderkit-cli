@@ -42,6 +42,15 @@ Command-line interface for Apple Reminders. Built on the private ReminderKit fra
 - `reminderkit search --title "bug" --tag "urgent"` — combine title search with tag filter
 - `reminderkit update --id <id> --title "New Title"` — rename a reminder
 
+## Output shaping
+
+By default, reminder/list JSON uses bare UUIDs for `id` (safe to pass unquoted) and omits fields at their default values (`completed=false`, `priority=0`, etc.). A parallel `uri` key carries the full `x-apple-reminderkit://...` URL. Two flags tune the output:
+
+- `--fields id,title,notes` — emit only the listed fields, in order. Use this to minimise tokens when scripting.
+- `--full` — restore the pre-v2 output (legacy emoji-wrapped `id`, all default-valued fields, no `uri`). Adds a new `uuid` key for forward-compat.
+
+`--id` accepts either a bare UUID or the legacy emoji-URL form interchangeably.
+
 ## Linking reminders to Apple Notes
 
 Link a reminder to an Apple Note using the `link-note` command:

@@ -40,6 +40,11 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit delete-list --name <name>\n");
     fprintf(stderr, "  reminderkit batch  (reads JSON array from stdin)\n");
     fprintf(stderr, "    ops: add, update, complete, delete, add-tag, remove-tag\n");
+    fprintf(stderr, "\n  Output shaping (applies to any command that returns JSON):\n");
+    fprintf(stderr, "    --fields <csv>      comma-separated list of fields to emit (preserves order)\n");
+    fprintf(stderr, "    --full              emit all fields including default-valued ones; use legacy emoji id\n");
+    fprintf(stderr, "                        (default: omit default-valued fields; emit bare-UUID id + uri)\n");
+    fprintf(stderr, "  IDs: --id accepts either a bare UUID or the full x-apple-reminderkit:// form\n");
     fprintf(stderr, "\n  Skill management:\n");
     fprintf(stderr, "  reminderkit install-skill [--claude] [--agents] [--force]\n");
     fprintf(stderr, "\n  Testing:\n");
@@ -78,7 +83,8 @@ int main(int argc, const char *argv[]) {
                     [flag isEqualToString:@"all"] ||
                     [flag isEqualToString:@"claude"] ||
                     [flag isEqualToString:@"agents"] ||
-                    [flag isEqualToString:@"force"]) {
+                    [flag isEqualToString:@"force"] ||
+                    [flag isEqualToString:@"full"]) {
                     if ([flag isEqualToString:@"include-completed"]) includeCompleted = YES;
                     if ([flag isEqualToString:@"has-url"]) hasURL = YES;
                     opts[flag] = @"true";
@@ -88,6 +94,21 @@ int main(int argc, const char *argv[]) {
             } else {
                 [positional addObject:arg];
             }
+        }
+
+        // Apply --fields / --full output shaping flags. --fields takes precedence.
+        gOutputFull = [opts[@"full"] isEqualToString:@"true"];
+        // --full implies legacy id format (with emoji) for byte-compat with pre-v2 scripts,
+        // plus a new "uuid" field carrying the bare UUID.
+        gOutputLegacyID = gOutputFull;
+        if (opts[@"fields"]) {
+            NSArray *rawFields = [opts[@"fields"] componentsSeparatedByString:@","];
+            NSMutableArray *cleaned = [NSMutableArray array];
+            for (NSString *f in rawFields) {
+                NSString *trimmed = [f stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                if (trimmed.length > 0) [cleaned addObject:trimmed];
+            }
+            if (cleaned.count > 0) gOutputFields = cleaned;
         }
 
         NSString *kwTitle = opts[@"title"];
