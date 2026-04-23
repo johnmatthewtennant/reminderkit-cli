@@ -27,12 +27,6 @@ static id getStore(void) {
         [REMStoreClass alloc], sel_registerName("initUserInteractive:"), YES);
 }
 
-// --- Forward Declarations ---
-
-static id findListByObjectID(id store, id targetObjID);
-static void reparentChangeItemAfter(id store, id saveReq, id listCI, id childCI, NSString *parentID, id afterSiblingCI);
-static void reparentChangeItemBefore(id store, id saveReq, id listCI, id childCI, NSString *parentID, id beforeSiblingCI);
-
 // --- Helpers ---
 
 static void errorExit(NSString *msg) {
@@ -745,6 +739,14 @@ static NSMutableDictionary *reminderToDict(id rem) {
 }
 
 
+// --- Forward Declarations ---
+
+static id findListByObjectID(id store, id targetObjID);
+static void sortRemindersByListOrdering(NSMutableArray *reminders, id list);
+static void reparentChangeItemAfter(id store, id saveReq, id listCI, id childCI, NSString *parentID, id afterSiblingCI);
+static void reparentChangeItemBefore(id store, id saveReq, id listCI, id childCI, NSString *parentID, id beforeSiblingCI);
+static NSMutableArray *fetchSortedSubtasks(id store, id parentRem);
+
 // --- Commands ---
 
 static int cmdLists(id store) {
@@ -875,31 +877,6 @@ static int cmdListAll(id store, BOOL includeCompleted, NSString *tagFilter, NSSt
     }
     printJSON(result);
     return 0;
-}
-
-// Sort an array of reminder objects by their position in the list's reminderIDsMergeableOrdering.
-// Reminders not in the ordered set sort last (preserving relative fetch order among them).
-static void sortRemindersByListOrdering(NSMutableArray *reminders, id list) {
-    if (reminders.count < 2) return;
-    id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
-    if (!storage) return;
-    id ordering = nil;
-    @try {
-        ordering = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("reminderIDsMergeableOrdering"));
-    } @catch (NSException *e) { return; }
-    if (!ordering || ![ordering isKindOfClass:[NSOrderedSet class]]) return;
-    NSOrderedSet *orderedSet = (NSOrderedSet *)ordering;
-    [reminders sortWithOptions:NSSortStable usingComparator:^NSComparisonResult(id a, id b) {
-        id aID = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("objectID"));
-        id bID = ((id (*)(id, SEL))objc_msgSend)(b, sel_registerName("objectID"));
-        NSUInteger aIdx = [orderedSet indexOfObject:aID];
-        NSUInteger bIdx = [orderedSet indexOfObject:bID];
-        if (aIdx == NSNotFound) aIdx = NSUIntegerMax;
-        if (bIdx == NSNotFound) bIdx = NSUIntegerMax;
-        if (aIdx < bIdx) return NSOrderedAscending;
-        if (aIdx > bIdx) return NSOrderedDescending;
-        return NSOrderedSame;
-    }];
 }
 
 static int cmdGetByID(id store, NSString *remID) {
@@ -1106,13 +1083,38 @@ static id findListByObjectID(id store, id targetObjID) {
     return nil;
 }
 
-// Shared helper: reparent a reminder change item under a parent.
-// When afterSiblingCI is non-nil, inserts the child after that sibling in display order
-// using REMReminderSubtaskContextChangeItem. Otherwise falls back to _reassignReminderChangeItem.
+// Sort an array of reminder objects by their position in the list's reminderIDsMergeableOrdering.
+// Reminders not in the ordered set sort last (preserving relative fetch order among them).
+static void sortRemindersByListOrdering(NSMutableArray *reminders, id list) {
+    if (reminders.count < 2) return;
+    id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+    if (!storage) return;
+    id ordering = nil;
+    @try {
+        ordering = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("reminderIDsMergeableOrdering"));
+    } @catch (NSException *e) { return; }
+    if (!ordering || ![ordering isKindOfClass:[NSOrderedSet class]]) return;
+    NSOrderedSet *orderedSet = (NSOrderedSet *)ordering;
+    [reminders sortWithOptions:NSSortStable usingComparator:^NSComparisonResult(id a, id b) {
+        id aID = ((id (*)(id, SEL))objc_msgSend)(a, sel_registerName("objectID"));
+        id bID = ((id (*)(id, SEL))objc_msgSend)(b, sel_registerName("objectID"));
+        NSUInteger aIdx = [orderedSet indexOfObject:aID];
+        NSUInteger bIdx = [orderedSet indexOfObject:bID];
+        if (aIdx == NSNotFound) aIdx = NSUIntegerMax;
+        if (bIdx == NSNotFound) bIdx = NSUIntegerMax;
+        if (aIdx < bIdx) return NSOrderedAscending;
+        if (aIdx > bIdx) return NSOrderedDescending;
+        return NSOrderedSame;
+    }];
+}
+
+// Shared helper: reparent a reminder change item under a parent (append to end).
 static void reparentChangeItem(id store, id saveReq, id listCI, id childCI, NSString *parentID) {
     reparentChangeItemAfter(store, saveReq, listCI, childCI, parentID, nil);
 }
 
+// Shared helper: reparent, inserting the child after a specific sibling.
+// When afterSiblingCI is nil, appends to the end.
 static void reparentChangeItemAfter(id store, id saveReq, id listCI, id childCI, NSString *parentID, id afterSiblingCI) {
     id parentRem = findReminderByID(store, parentID);
     if (!parentRem) errorExit([NSString stringWithFormat:@"Parent not found with id: %@", parentID]);
@@ -1123,12 +1125,10 @@ static void reparentChangeItemAfter(id store, id saveReq, id listCI, id childCI,
     id subtaskCtx = ((id (*)(id, SEL))objc_msgSend)(parentCI, sel_registerName("subtaskContext"));
     if (subtaskCtx) {
         if (afterSiblingCI) {
-            // Insert after a specific sibling (preserves batch order)
             ((void (*)(id, SEL, id, id))objc_msgSend)(
                 subtaskCtx, sel_registerName("insertReminderChangeItem:afterReminderChangeItem:"),
                 childCI, afterSiblingCI);
         } else {
-            // Append to end of parent's subtask list (first subtask or standalone add)
             ((void (*)(id, SEL, id))objc_msgSend)(
                 subtaskCtx, sel_registerName("addReminderChangeItem:"),
                 childCI);
@@ -1142,6 +1142,7 @@ static void reparentChangeItemAfter(id store, id saveReq, id listCI, id childCI,
         childCI, parentCI);
 }
 
+// Shared helper: reparent, inserting the child before a specific sibling.
 static void reparentChangeItemBefore(id store, id saveReq, id listCI, id childCI, NSString *parentID, id beforeSiblingCI) {
     id parentRem = findReminderByID(store, parentID);
     if (!parentRem) errorExit([NSString stringWithFormat:@"Parent not found with id: %@", parentID]);
@@ -1163,7 +1164,7 @@ static void reparentChangeItemBefore(id store, id saveReq, id listCI, id childCI
         childCI, parentCI);
 }
 
-// Fetch a parent's subtasks sorted by list ordering. Returns an NSMutableArray of reminder objects.
+// Fetch a parent's subtasks sorted by list display ordering.
 static NSMutableArray *fetchSortedSubtasks(id store, id parentRem) {
     id parentObjID = ((id (*)(id, SEL))objc_msgSend)(parentRem, sel_registerName("objectID"));
     NSString *parentIDStr = objectIDToString(parentObjID);
