@@ -1263,6 +1263,269 @@ static int cmdTest(id store) {
         }
     }
 
+    // Test: Batch subtask ordering — subtasks created via batch preserve JSON array order
+    fprintf(stderr, "Test: batch subtask ordering...\n");
+    {
+        // Create a parent for subtask ordering test
+        NSString *orderParent = @"__remcli_order_parent__";
+        int rp = cmdAdd(store, orderParent, testListName, @{});
+        if (rp != 0) { fprintf(stderr, "  FAIL (add parent)\n"); failed++; }
+        else {
+            id parentRem = findReminder(store, orderParent, testListName);
+            NSString *parentID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(parentRem, sel_registerName("objectID")));
+
+            // Add 5 subtasks via batch in a specific order
+            NSString *batchJSON = [NSString stringWithFormat:
+                @"["
+                @"{\"op\":\"add\",\"title\":\"__order_sub_1__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__order_sub_2__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__order_sub_3__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__order_sub_4__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__order_sub_5__\",\"parent-id\":\"%@\"}"
+                @"]", parentID, parentID, parentID, parentID, parentID];
+            __block int rb = -1;
+            captureStdoutWithStdin(batchJSON, ^{ rb = cmdBatch(store); });
+            if (rb != 0) { fprintf(stderr, "  FAIL (batch returned %d)\n", rb); failed++; }
+            else {
+                // Fetch subtasks and verify order matches JSON input
+                __block int rs = -1;
+                NSData *subOut = captureStdout(^{ rs = cmdSubtasks(store, orderParent, testListName); });
+                if (rs != 0) { fprintf(stderr, "  FAIL (subtasks returned %d)\n", rs); failed++; }
+                else {
+                    id json = parseJSONFromData(subOut);
+                    if (![json isKindOfClass:[NSArray class]] || [(NSArray *)json count] != 5) {
+                        fprintf(stderr, "  FAIL (expected 5 subtasks, got %lu)\n",
+                            (unsigned long)([(NSArray *)json count])); failed++;
+                    } else {
+                        NSArray *titles = @[@"__order_sub_1__", @"__order_sub_2__",
+                            @"__order_sub_3__", @"__order_sub_4__", @"__order_sub_5__"];
+                        BOOL orderOK = YES;
+                        for (NSUInteger i = 0; i < 5; i++) {
+                            NSString *got = ((NSDictionary *)json[i])[@"title"];
+                            if (![got isEqualToString:titles[i]]) {
+                                fprintf(stderr, "  FAIL (index %lu: expected %s, got %s)\n",
+                                    (unsigned long)i, [titles[i] UTF8String], [got UTF8String]);
+                                orderOK = NO;
+                                break;
+                            }
+                        }
+                        if (orderOK) { fprintf(stderr, "  PASS\n"); passed++; }
+                        else { failed++; }
+                    }
+                }
+            }
+
+            // Cleanup: delete subtasks and parent
+            for (NSString *subTitle in @[@"__order_sub_1__", @"__order_sub_2__",
+                @"__order_sub_3__", @"__order_sub_4__", @"__order_sub_5__"]) {
+                id sub = findReminder(store, subTitle, testListName);
+                if (sub) {
+                    NSString *subID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(sub, sel_registerName("objectID")));
+                    cmdDelete(store, subID);
+                }
+            }
+            cmdDelete(store, parentID);
+        }
+    }
+
+    // Test: cmdAdd --after-id positions subtask after a specific sibling
+    fprintf(stderr, "Test: cmdAdd --after-id...\n");
+    {
+        // Create parent with 3 subtasks
+        NSString *afterIdParent = @"__remcli_afterid_parent__";
+        int rp = cmdAdd(store, afterIdParent, testListName, @{});
+        if (rp != 0) { fprintf(stderr, "  FAIL (add parent)\n"); failed++; }
+        else {
+            id pRem = findReminder(store, afterIdParent, testListName);
+            NSString *pID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(pRem, sel_registerName("objectID")));
+
+            // Add 3 subtasks via batch
+            NSString *batchJSON = [NSString stringWithFormat:
+                @"["
+                @"{\"op\":\"add\",\"title\":\"__afterid_sub_1__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__afterid_sub_2__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__afterid_sub_3__\",\"parent-id\":\"%@\"}"
+                @"]", pID, pID, pID];
+            __block int rb = -1;
+            captureStdoutWithStdin(batchJSON, ^{ rb = cmdBatch(store); });
+
+            if (rb != 0) { fprintf(stderr, "  FAIL (batch returned %d)\n", rb); failed++; }
+            else {
+                // Get sub_1 ID, then add sub_4 after sub_1
+                id sub1 = findReminder(store, @"__afterid_sub_1__", testListName);
+                NSString *sub1ID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(sub1, sel_registerName("objectID")));
+                int ra = cmdAdd(store, @"__afterid_sub_4__", nil, @{@"parent-id": pID, @"after-id": sub1ID});
+                if (ra != 0) { fprintf(stderr, "  FAIL (add with --after-id returned %d)\n", ra); failed++; }
+                else {
+                    // Fetch subtasks and verify order: sub_1, sub_4, sub_2, sub_3
+                    __block int rs = -1;
+                    NSData *subOut = captureStdout(^{ rs = cmdSubtasks(store, afterIdParent, testListName); });
+                    if (rs != 0) { fprintf(stderr, "  FAIL (subtasks returned %d)\n", rs); failed++; }
+                    else {
+                        id json = parseJSONFromData(subOut);
+                        if (![json isKindOfClass:[NSArray class]] || [(NSArray *)json count] != 4) {
+                            fprintf(stderr, "  FAIL (expected 4 subtasks, got %lu)\n",
+                                (unsigned long)([(NSArray *)json count])); failed++;
+                        } else {
+                            NSArray *expected = @[@"__afterid_sub_1__", @"__afterid_sub_4__",
+                                @"__afterid_sub_2__", @"__afterid_sub_3__"];
+                            BOOL orderOK = YES;
+                            for (NSUInteger i = 0; i < 4; i++) {
+                                NSString *got = ((NSDictionary *)json[i])[@"title"];
+                                if (![got isEqualToString:expected[i]]) {
+                                    fprintf(stderr, "  FAIL (index %lu: expected %s, got %s)\n",
+                                        (unsigned long)i, [expected[i] UTF8String], [got UTF8String]);
+                                    orderOK = NO;
+                                    break;
+                                }
+                            }
+                            if (orderOK) { fprintf(stderr, "  PASS\n"); passed++; }
+                            else { failed++; }
+                        }
+                    }
+                }
+            }
+
+            // Cleanup
+            for (NSString *subTitle in @[@"__afterid_sub_1__", @"__afterid_sub_2__",
+                @"__afterid_sub_3__", @"__afterid_sub_4__"]) {
+                id sub = findReminder(store, subTitle, testListName);
+                if (sub) {
+                    NSString *subID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(sub, sel_registerName("objectID")));
+                    cmdDelete(store, subID);
+                }
+            }
+            cmdDelete(store, pID);
+        }
+    }
+
+    // Test: cmdAdd --position inserts subtask at correct position
+    fprintf(stderr, "Test: cmdAdd --position...\n");
+    {
+        // Create parent with 3 subtasks
+        NSString *posParent = @"__remcli_pos_parent__";
+        int rp = cmdAdd(store, posParent, testListName, @{});
+        if (rp != 0) { fprintf(stderr, "  FAIL (add parent)\n"); failed++; }
+        else {
+            id pRem = findReminder(store, posParent, testListName);
+            NSString *pID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(pRem, sel_registerName("objectID")));
+
+            // Add 3 subtasks via batch
+            NSString *batchJSON = [NSString stringWithFormat:
+                @"["
+                @"{\"op\":\"add\",\"title\":\"__pos_sub_1__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__pos_sub_2__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__pos_sub_3__\",\"parent-id\":\"%@\"}"
+                @"]", pID, pID, pID];
+            __block int rb = -1;
+            captureStdoutWithStdin(batchJSON, ^{ rb = cmdBatch(store); });
+
+            if (rb != 0) { fprintf(stderr, "  FAIL (batch returned %d)\n", rb); failed++; }
+            else {
+                // Add sub_4 at position 2 (should go between sub_1 and sub_2)
+                int ra = cmdAdd(store, @"__pos_sub_4__", nil, @{@"parent-id": pID, @"position": @"2"});
+                if (ra != 0) { fprintf(stderr, "  FAIL (add with --position returned %d)\n", ra); failed++; }
+                else {
+                    // Fetch subtasks and verify order: sub_1, sub_4, sub_2, sub_3
+                    __block int rs = -1;
+                    NSData *subOut = captureStdout(^{ rs = cmdSubtasks(store, posParent, testListName); });
+                    if (rs != 0) { fprintf(stderr, "  FAIL (subtasks returned %d)\n", rs); failed++; }
+                    else {
+                        id json = parseJSONFromData(subOut);
+                        if (![json isKindOfClass:[NSArray class]] || [(NSArray *)json count] != 4) {
+                            fprintf(stderr, "  FAIL (expected 4 subtasks, got %lu)\n",
+                                (unsigned long)([(NSArray *)json count])); failed++;
+                        } else {
+                            NSArray *expected = @[@"__pos_sub_1__", @"__pos_sub_4__",
+                                @"__pos_sub_2__", @"__pos_sub_3__"];
+                            BOOL orderOK = YES;
+                            for (NSUInteger i = 0; i < 4; i++) {
+                                NSString *got = ((NSDictionary *)json[i])[@"title"];
+                                if (![got isEqualToString:expected[i]]) {
+                                    fprintf(stderr, "  FAIL (index %lu: expected %s, got %s)\n",
+                                        (unsigned long)i, [expected[i] UTF8String], [got UTF8String]);
+                                    orderOK = NO;
+                                    break;
+                                }
+                            }
+                            if (orderOK) { fprintf(stderr, "  PASS\n"); passed++; }
+                            else { failed++; }
+                        }
+                    }
+                }
+            }
+
+            // Cleanup
+            for (NSString *subTitle in @[@"__pos_sub_1__", @"__pos_sub_2__",
+                @"__pos_sub_3__", @"__pos_sub_4__"]) {
+                id sub = findReminder(store, subTitle, testListName);
+                if (sub) {
+                    NSString *subID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(sub, sel_registerName("objectID")));
+                    cmdDelete(store, subID);
+                }
+            }
+            cmdDelete(store, pID);
+        }
+    }
+
+    // Test: cmdAdd --position 1 inserts at beginning
+    fprintf(stderr, "Test: cmdAdd --position 1 (insert at beginning)...\n");
+    {
+        NSString *pos1Parent = @"__remcli_pos1_parent__";
+        int rp = cmdAdd(store, pos1Parent, testListName, @{});
+        if (rp != 0) { fprintf(stderr, "  FAIL (add parent)\n"); failed++; }
+        else {
+            id pRem = findReminder(store, pos1Parent, testListName);
+            NSString *pID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(pRem, sel_registerName("objectID")));
+
+            // Add 2 subtasks via batch
+            NSString *batchJSON = [NSString stringWithFormat:
+                @"["
+                @"{\"op\":\"add\",\"title\":\"__pos1_sub_A__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__pos1_sub_B__\",\"parent-id\":\"%@\"}"
+                @"]", pID, pID];
+            __block int rb = -1;
+            captureStdoutWithStdin(batchJSON, ^{ rb = cmdBatch(store); });
+
+            if (rb != 0) { fprintf(stderr, "  FAIL (batch returned %d)\n", rb); failed++; }
+            else {
+                // Insert sub_C at position 1 (should become first)
+                int ra = cmdAdd(store, @"__pos1_sub_C__", nil, @{@"parent-id": pID, @"position": @"1"});
+                if (ra != 0) { fprintf(stderr, "  FAIL (add with --position 1 returned %d)\n", ra); failed++; }
+                else {
+                    __block int rs = -1;
+                    NSData *subOut = captureStdout(^{ rs = cmdSubtasks(store, pos1Parent, testListName); });
+                    if (rs != 0) { fprintf(stderr, "  FAIL (subtasks returned %d)\n", rs); failed++; }
+                    else {
+                        id json = parseJSONFromData(subOut);
+                        if (![json isKindOfClass:[NSArray class]] || [(NSArray *)json count] != 3) {
+                            fprintf(stderr, "  FAIL (expected 3 subtasks, got %lu)\n",
+                                (unsigned long)([(NSArray *)json count])); failed++;
+                        } else {
+                            NSString *firstTitle = ((NSDictionary *)json[0])[@"title"];
+                            if ([firstTitle isEqualToString:@"__pos1_sub_C__"]) {
+                                fprintf(stderr, "  PASS\n"); passed++;
+                            } else {
+                                fprintf(stderr, "  FAIL (expected __pos1_sub_C__ first, got %s)\n",
+                                    [firstTitle UTF8String]); failed++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Cleanup
+            for (NSString *subTitle in @[@"__pos1_sub_A__", @"__pos1_sub_B__", @"__pos1_sub_C__"]) {
+                id sub = findReminder(store, subTitle, testListName);
+                if (sub) {
+                    NSString *subID = objectIDToString(((id (*)(id, SEL))objc_msgSend)(sub, sel_registerName("objectID")));
+                    cmdDelete(store, subID);
+                }
+            }
+            cmdDelete(store, pID);
+        }
+    }
+
     // Cleanup
     // Test 47: cmdDelete child
     fprintf(stderr, "Test 47: cmdDelete child...\n");
