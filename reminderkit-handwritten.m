@@ -24,7 +24,7 @@ static int cmdBatch(id store) {
     NSSet *validKeys = [NSSet setWithArray:@[@"op", @"title", @"id", @"list",
         @"notes", @"append-notes", @"priority", @"flagged", @"completed",
         @"due-date", @"start-date", @"url", @"clear-url", @"remove-parent", @"remove-from-list",
-        @"parent-id", @"to-list", @"tag"]];
+        @"parent-id", @"to-list", @"tag", @"after-id", @"position"]];
 
     // Validate all operations first
     for (NSUInteger i = 0; i < ops.count; i++) {
@@ -86,6 +86,8 @@ static int cmdBatch(id store) {
     NSMutableArray *results = [NSMutableArray array];
     // Track tags added during this batch to dedupe within a single batch payload
     NSMutableDictionary *batchAddedTags = [NSMutableDictionary dictionary]; // remID -> NSMutableSet of tag names
+    // Track last subtask change item per parent for ordered insertion
+    NSMutableDictionary *lastSubtaskCI = [NSMutableDictionary dictionary]; // parentID -> last child change item
 
     for (NSDictionary *op in ops) {
         NSString *opType = op[@"op"];
@@ -138,9 +140,48 @@ static int cmdBatch(id store) {
                 ((void (*)(id, SEL, BOOL))objc_msgSend)(newRem, sel_registerName("setCompleted:"), val);
             }
 
-            // Reparent if parent-id specified
+            // Reparent if parent-id specified (with optional after-id / position for ordering)
             if (batchParentID) {
-                reparentChangeItem(store, saveReq, listCI, newRem, batchParentID);
+                NSString *batchAfterID = op[@"after-id"];
+                NSString *batchPositionStr = op[@"position"];
+
+                if (batchAfterID && batchPositionStr) {
+                    errorExit([NSString stringWithFormat:@"Operation %lu: cannot use after-id and position together", (unsigned long)[ops indexOfObject:op]]);
+                }
+
+                if (batchAfterID) {
+                    id afterRem = findReminderByID(store, batchAfterID);
+                    if (!afterRem) errorExit([NSString stringWithFormat:@"Sibling not found with id: %@", batchAfterID]);
+                    id afterCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                        saveReq, sel_registerName("updateReminder:"), afterRem);
+                    reparentChangeItemAfter(store, saveReq, listCI, newRem, batchParentID, afterCI);
+                    lastSubtaskCI[batchParentID] = newRem;
+                } else if (batchPositionStr) {
+                    NSInteger pos = [batchPositionStr integerValue];
+                    if (pos < 1) errorExit(@"position must be >= 1");
+
+                    id batchParentRem2 = findReminderByID(store, batchParentID);
+                    NSMutableArray *siblings = fetchSortedSubtasks(store, batchParentRem2);
+
+                    if (pos == 1 && siblings.count > 0) {
+                        id firstSibling = siblings[0];
+                        id firstCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                            saveReq, sel_registerName("updateReminder:"), firstSibling);
+                        reparentChangeItemBefore(store, saveReq, listCI, newRem, batchParentID, firstCI);
+                    } else if (pos <= (NSInteger)siblings.count) {
+                        id prevSib = siblings[pos - 1];
+                        id prevCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                            saveReq, sel_registerName("updateReminder:"), prevSib);
+                        reparentChangeItemAfter(store, saveReq, listCI, newRem, batchParentID, prevCI);
+                    } else {
+                        reparentChangeItem(store, saveReq, listCI, newRem, batchParentID);
+                    }
+                    lastSubtaskCI[batchParentID] = newRem;
+                } else {
+                    id prevSibling = lastSubtaskCI[batchParentID];
+                    reparentChangeItemAfter(store, saveReq, listCI, newRem, batchParentID, prevSibling);
+                    lastSubtaskCI[batchParentID] = newRem;
+                }
             }
 
             [results addObject:@{@"op": @"add", @"title": opTitle, @"status": @"ok"}];
