@@ -1526,6 +1526,129 @@ static int cmdTest(id store) {
         }
     }
 
+    // Test: cmdUpdate --to-list moves reminder between lists
+    fprintf(stderr, "Test: cmdUpdate --to-list...\n");
+    {
+        NSString *destListName = @"__remcli_test_dest_list__";
+        // Clean up any leftover dest list
+        id oldDest = findList(store, destListName);
+        if (oldDest) {
+            NSArray *oldRems = fetchReminders(store, oldDest, YES);
+            id cleanReq = ((id (*)(id, SEL, id))objc_msgSend)(
+                [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+            for (id oldRem in oldRems) {
+                id ci = ((id (*)(id, SEL, id))objc_msgSend)(cleanReq, sel_registerName("updateReminder:"), oldRem);
+                ((void (*)(id, SEL))objc_msgSend)(ci, sel_registerName("removeFromList"));
+            }
+            id dci = ((id (*)(id, SEL, id))objc_msgSend)(cleanReq, sel_registerName("updateList:"), oldDest);
+            ((void (*)(id, SEL))objc_msgSend)(dci, sel_registerName("removeFromParent"));
+            ((BOOL (*)(id, SEL, id*))objc_msgSend)(cleanReq, sel_registerName("saveSynchronouslyWithError:"), nil);
+        }
+
+        int rc = cmdCreateList(store, destListName);
+        if (rc != 0) { fprintf(stderr, "  FAIL (could not create dest list)\n"); failed++; }
+        else {
+            // Add a reminder to the test list
+            NSString *moveTitle = @"__remcli_test_move__";
+            int ra = cmdAdd(store, moveTitle, testListName, @{});
+            if (ra != 0) { fprintf(stderr, "  FAIL (could not add reminder)\n"); failed++; }
+            else {
+                id moveRem = findReminder(store, moveTitle, testListName);
+                NSString *moveID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(moveRem, sel_registerName("objectID")));
+
+                // Get the dest list's objectID for comparison
+                id destList = findList(store, destListName);
+                id destListObjID = ((id (*)(id, SEL))objc_msgSend)(destList, sel_registerName("objectID"));
+                NSString *destListIDStr = objectIDToUUID(destListObjID);
+
+                // Move via update --to-list
+                __block int ru = -1;
+                NSData *updateOut = captureStdout(^{
+                    ru = cmdUpdate(store, nil, @{@"id": moveID, @"to-list": destListName});
+                });
+                if (ru != 0) { fprintf(stderr, "  FAIL (update returned %d)\n", ru); failed++; }
+                else {
+                    // Verify the reminder's listId changed to dest list
+                    id movedRem = findReminderByID(store, moveID);
+                    if (!movedRem) { fprintf(stderr, "  FAIL (reminder not found after move)\n"); failed++; }
+                    else {
+                        id newListID = ((id (*)(id, SEL))objc_msgSend)(movedRem, sel_registerName("listID"));
+                        NSString *newListIDStr = objectIDToUUID(newListID);
+                        if ([newListIDStr isEqualToString:destListIDStr]) {
+                            fprintf(stderr, "  PASS\n"); passed++;
+                        } else {
+                            fprintf(stderr, "  FAIL (listId not updated: got %s, expected %s)\n",
+                                [newListIDStr UTF8String], [destListIDStr UTF8String]); failed++;
+                        }
+                    }
+                    // Cleanup the moved reminder
+                    cmdDelete(store, moveID);
+                }
+            }
+            cmdDeleteList(store, destListName);
+        }
+    }
+
+    // Test: batch update to-list moves reminder between lists
+    fprintf(stderr, "Test: batch update to-list...\n");
+    {
+        NSString *destListName2 = @"__remcli_test_dest_list2__";
+        // Clean up any leftover dest list
+        id oldDest2 = findList(store, destListName2);
+        if (oldDest2) {
+            NSArray *oldRems = fetchReminders(store, oldDest2, YES);
+            id cleanReq = ((id (*)(id, SEL, id))objc_msgSend)(
+                [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+            for (id oldRem in oldRems) {
+                id ci = ((id (*)(id, SEL, id))objc_msgSend)(cleanReq, sel_registerName("updateReminder:"), oldRem);
+                ((void (*)(id, SEL))objc_msgSend)(ci, sel_registerName("removeFromList"));
+            }
+            id dci = ((id (*)(id, SEL, id))objc_msgSend)(cleanReq, sel_registerName("updateList:"), oldDest2);
+            ((void (*)(id, SEL))objc_msgSend)(dci, sel_registerName("removeFromParent"));
+            ((BOOL (*)(id, SEL, id*))objc_msgSend)(cleanReq, sel_registerName("saveSynchronouslyWithError:"), nil);
+        }
+
+        int rc = cmdCreateList(store, destListName2);
+        if (rc != 0) { fprintf(stderr, "  FAIL (could not create dest list)\n"); failed++; }
+        else {
+            NSString *moveTitle2 = @"__remcli_test_batch_move__";
+            int ra = cmdAdd(store, moveTitle2, testListName, @{});
+            if (ra != 0) { fprintf(stderr, "  FAIL (could not add reminder)\n"); failed++; }
+            else {
+                id moveRem2 = findReminder(store, moveTitle2, testListName);
+                NSString *moveID2 = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(moveRem2, sel_registerName("objectID")));
+
+                id destList2 = findList(store, destListName2);
+                id destListObjID2 = ((id (*)(id, SEL))objc_msgSend)(destList2, sel_registerName("objectID"));
+                NSString *destListIDStr2 = objectIDToUUID(destListObjID2);
+
+                // Move via batch
+                NSString *batchJSON = [NSString stringWithFormat:
+                    @"[{\"op\":\"update\",\"id\":\"%@\",\"to-list\":\"%@\"}]",
+                    moveID2, destListName2];
+                __block int rb = -1;
+                NSData *batchOut = captureStdoutWithStdin(batchJSON, ^{ rb = cmdBatch(store); });
+                if (rb != 0) { fprintf(stderr, "  FAIL (batch returned %d)\n", rb); failed++; }
+                else {
+                    id movedRem2 = findReminderByID(store, moveID2);
+                    if (!movedRem2) { fprintf(stderr, "  FAIL (reminder not found after move)\n"); failed++; }
+                    else {
+                        id newListID2 = ((id (*)(id, SEL))objc_msgSend)(movedRem2, sel_registerName("listID"));
+                        NSString *newListIDStr2 = objectIDToUUID(newListID2);
+                        if ([newListIDStr2 isEqualToString:destListIDStr2]) {
+                            fprintf(stderr, "  PASS\n"); passed++;
+                        } else {
+                            fprintf(stderr, "  FAIL (listId not updated: got %s, expected %s)\n",
+                                [newListIDStr2 UTF8String], [destListIDStr2 UTF8String]); failed++;
+                        }
+                    }
+                    cmdDelete(store, moveID2);
+                }
+            }
+            cmdDeleteList(store, destListName2);
+        }
+    }
+
     // Cleanup
     // Test 47: cmdDelete child
     fprintf(stderr, "Test 47: cmdDelete child...\n");
