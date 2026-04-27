@@ -1684,13 +1684,9 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
         id destListCI = ((id (*)(id, SEL, id))objc_msgSend)(
             saveReq, sel_registerName("updateList:"), destList);
 
-        // Use initWithReminderChangeItem:insertIntoListChangeItem: to move
-        Class REMReminderCIClass = NSClassFromString(@"REMReminderChangeItem");
-        id moveCI = ((id (*)(id, SEL, id, id))objc_msgSend)(
-            [REMReminderCIClass alloc],
-            sel_registerName("initWithReminderChangeItem:insertIntoListChangeItem:"),
-            changeItem, destListCI);
-        if (!moveCI) errorExit(@"Failed to create move operation");
+        // Register the reminder change item with the destination list
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            destListCI, sel_registerName("addReminderChangeItem:"), changeItem);
     }
 
     NSError *error = nil;
