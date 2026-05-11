@@ -397,12 +397,14 @@ static NSArray *fetchLists(id store) {
     if (error) {
         if ([[error domain] isEqualToString:@"NSCocoaErrorDomain"] && [error code] == 4097) {
             fprintf(stderr, "Error: Reminders access denied.\n\n");
-            fprintf(stderr, "reminderkit needs permission to access Reminders.\n\n");
-            fprintf(stderr, "1. Retry from an interactive shell to trigger the macOS permission prompt:\n");
-            fprintf(stderr, "   reminderkit lists\n\n");
-            fprintf(stderr, "2. If permission was previously denied, reset reminderkit first, then retry:\n");
-            fprintf(stderr, "   tccutil reset Reminders com.jtennant.reminderkit-cli\n");
-            fprintf(stderr, "   reminderkit lists\n");
+            fprintf(stderr, "Your terminal app needs permission to access Reminders.\n\n");
+            fprintf(stderr, "1. Grant permission (triggers macOS prompt):\n");
+            fprintf(stderr, "   osascript -e 'tell application \"Reminders\" to get name of every list'\n\n");
+            fprintf(stderr, "2. If previously denied, reset first, then re-run step 1:\n");
+            fprintf(stderr, "   tccutil reset Reminders <bundle-id>\n\n");
+            fprintf(stderr, "   Find your terminal's bundle ID:\n");
+            fprintf(stderr, "   osascript -e 'id of app \"iTerm\"'  (replace iTerm with your terminal app name)\n\n");
+            fprintf(stderr, "3. Then retry: reminderkit lists\n");
             exit(1);
         }
         errorExit([NSString stringWithFormat:@"Failed to fetch lists: %@", error]);
