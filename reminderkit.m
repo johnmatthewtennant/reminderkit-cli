@@ -6,6 +6,7 @@
 //   3. tests       — provides cmdTest + test helpers (uses commands from both)
 //
 // usage() and main() follow the includes so they can reference all symbols.
+#include "disclaim.h"
 #include "reminderkit-generated.m"
 #include "reminderkit-handwritten.m"
 #include "reminderkit-tests.m"
@@ -57,6 +58,8 @@ static void usage(void) {
 // --- Main ---
 
 int main(int argc, const char *argv[]) {
+    reminderkit_disclaim_if_needed(argc, (char **)argv);
+
     @autoreleasepool {
         if (argc < 2) { usage(); return 1; }
 

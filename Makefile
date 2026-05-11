@@ -1,10 +1,14 @@
 CC = clang
-CFLAGS = -framework Foundation -lobjc -O2
+CFLAGS = -framework Foundation -framework EventKit -lobjc -O2
+INFO_PLIST = Info.plist
+BUNDLE_ID = com.jtennant.reminderkit-cli
+INFO_PLIST_FLAGS = -Wl,-sectcreate,__TEXT,__info_plist,$(INFO_PLIST)
 
 all: reminderkit
 
-reminderkit: reminderkit.m reminderkit-generated.m reminderkit-handwritten.m reminderkit-tests.m
-	$(CC) $(CFLAGS) $< -o $@
+reminderkit: reminderkit.m reminderkit-generated.m reminderkit-handwritten.m reminderkit-tests.m disclaim.c disclaim.h $(INFO_PLIST)
+	$(CC) $(CFLAGS) $(INFO_PLIST_FLAGS) reminderkit.m disclaim.c -o $@
+	codesign --force --sign - --identifier $(BUNDLE_ID) $@
 
 remkit-inspect: remkit-inspect.m
 	$(CC) $(CFLAGS) $< -o $@

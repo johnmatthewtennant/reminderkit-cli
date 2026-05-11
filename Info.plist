@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.jtennant.reminderkit-cli</string>
+    <key>CFBundleName</key>
+    <string>reminderkit</string>
+    <key>NSRemindersUsageDescription</key>
+    <string>reminderkit accesses Apple Reminders to list, create, update, and complete reminders from the command line.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>reminderkit needs full access to Apple Reminders to list, create, update, and complete reminders from the command line.</string>
+</dict>
+</plist>
