@@ -8,6 +8,7 @@
 // usage() and main() follow the includes so they can reference all symbols.
 #include "disclaim.h"
 #include "reminderkit-generated.m"
+#include "reminderkit-version-check.m"
 #include "reminderkit-handwritten.m"
 #include "reminderkit-tests.m"
 
@@ -48,6 +49,7 @@ static void usage(void) {
     fprintf(stderr, "  IDs: --id accepts either a bare UUID or the full x-apple-reminderkit:// form\n");
     fprintf(stderr, "\n  Skill management:\n");
     fprintf(stderr, "  reminderkit install-skill [--claude] [--agents] [--force]\n");
+    fprintf(stderr, "  reminderkit version [--skip-check]\n");
     fprintf(stderr, "\n  Testing:\n");
     fprintf(stderr, "  reminderkit test\n");
     fprintf(stderr, "\n  Report issues:\n");
@@ -58,14 +60,11 @@ static void usage(void) {
 // --- Main ---
 
 int main(int argc, const char *argv[]) {
-    reminderkit_disclaim_if_needed(argc, (char **)argv);
-
     @autoreleasepool {
         if (argc < 2) { usage(); return 1; }
 
-        loadFramework();
-
         NSString *command = [NSString stringWithUTF8String:argv[1]];
+        if ([command isEqualToString:@"--version"]) { return cmdVersion(YES); }
 
         // Parse arguments
         NSMutableArray *positional = [NSMutableArray array];
@@ -98,6 +97,28 @@ int main(int argc, const char *argv[]) {
                 [positional addObject:arg];
             }
         }
+
+        if ([command isEqualToString:@"help"] || [command isEqualToString:@"--help"] || [command isEqualToString:@"-h"] ||
+            [opts[@"help"] isEqualToString:@"true"]) {
+            usage();
+            return 0;
+        }
+
+        if ([command isEqualToString:@"version"]) {
+            return cmdVersion([opts[@"skip-check"] isEqualToString:@"true"]);
+        }
+
+        if ([command isEqualToString:@"install-skill"]) {
+            BOOL wantClaude = [opts[@"claude"] isEqualToString:@"true"];
+            BOOL wantAgents = [opts[@"agents"] isEqualToString:@"true"];
+            BOOL force = [opts[@"force"] isEqualToString:@"true"];
+            if (!wantClaude && !wantAgents) { wantClaude = YES; wantAgents = YES; }
+            return cmdInstallSkill(wantClaude, wantAgents, force);
+        }
+
+        reminderkit_disclaim_if_needed(argc, (char **)argv);
+
+        loadFramework();
 
         // Apply --fields / --full output shaping flags. --fields takes precedence.
         gOutputFull = [opts[@"full"] isEqualToString:@"true"];
@@ -167,11 +188,14 @@ int main(int argc, const char *argv[]) {
 
         id store = getStore();
 
+        attemptBackgroundUpgrade();
+
         // Reject unexpected positional arguments
         if (positional.count > 0 &&
             ![command isEqualToString:@"batch"] &&
             ![command isEqualToString:@"lists"] &&
             ![command isEqualToString:@"install-skill"] &&
+            ![command isEqualToString:@"version"] &&
             ![command isEqualToString:@"test"] &&
             ![command isEqualToString:@"help"] &&
             ![command isEqualToString:@"--help"] &&
@@ -270,12 +294,8 @@ int main(int argc, const char *argv[]) {
             if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
             return cmdDeleteList(store, kwName);
 
-        } else if ([command isEqualToString:@"install-skill"]) {
-            BOOL wantClaude = [opts[@"claude"] isEqualToString:@"true"];
-            BOOL wantAgents = [opts[@"agents"] isEqualToString:@"true"];
-            BOOL force = [opts[@"force"] isEqualToString:@"true"];
-            if (!wantClaude && !wantAgents) { wantClaude = YES; wantAgents = YES; }
-            return cmdInstallSkill(wantClaude, wantAgents, force);
+        } else if ([command isEqualToString:@"version"]) {
+            return cmdVersion([opts[@"skip-check"] isEqualToString:@"true"]);
 
         } else if ([command isEqualToString:@"test"]) {
             return cmdTest(store);
