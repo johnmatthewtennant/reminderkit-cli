@@ -116,7 +116,32 @@ int main(int argc, const char *argv[]) {
             return cmdInstallSkill(wantClaude, wantAgents, force);
         }
 
-        reminderkit_disclaim_if_needed(argc, (char **)argv);
+        NSSet *knownCommands = [NSSet setWithObjects:
+            @"lists", @"list", @"search", @"get", @"subtasks", @"add", @"update",
+            @"complete", @"delete", @"batch", @"add-tag", @"remove-tag", @"assign",
+            @"unassign", @"list-sharees", @"link-note", @"list-sections",
+            @"create-section", @"create-list", @"rename-list", @"delete-list",
+            @"install-skill", @"version", @"test", nil];
+        if (![knownCommands containsObject:command]) {
+            fprintf(stderr, "Unknown command: %s\n", [command UTF8String]);
+            usage();
+            return 1;
+        }
+
+        // Reject unexpected positional arguments before touching ReminderKit so
+        // malformed commands do not trigger a privacy prompt.
+        if (positional.count > 0 &&
+            ![command isEqualToString:@"batch"] &&
+            ![command isEqualToString:@"lists"] &&
+            ![command isEqualToString:@"test"]) {
+            fprintf(stderr, "Error: unexpected argument '%s'. All arguments must use --flag syntax.\n", [positional[0] UTF8String]);
+            usage();
+            return 1;
+        }
+
+        if ([[[NSProcessInfo processInfo] environment][@"REMINDERKIT_SELF_RESPONSIBLE"] length] > 0) {
+            reminderkit_disclaim_if_needed(argc, (char **)argv);
+        }
 
         loadFramework();
 
@@ -189,21 +214,6 @@ int main(int argc, const char *argv[]) {
         id store = getStore();
 
         attemptBackgroundUpgrade();
-
-        // Reject unexpected positional arguments
-        if (positional.count > 0 &&
-            ![command isEqualToString:@"batch"] &&
-            ![command isEqualToString:@"lists"] &&
-            ![command isEqualToString:@"install-skill"] &&
-            ![command isEqualToString:@"version"] &&
-            ![command isEqualToString:@"test"] &&
-            ![command isEqualToString:@"help"] &&
-            ![command isEqualToString:@"--help"] &&
-            ![command isEqualToString:@"-h"]) {
-            fprintf(stderr, "Error: unexpected argument '%s'. All arguments must use --flag syntax.\n", [positional[0] UTF8String]);
-            usage();
-            return 1;
-        }
 
         if ([command isEqualToString:@"lists"]) {
             return cmdLists(store);
