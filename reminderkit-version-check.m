@@ -1,6 +1,6 @@
 // Version checks and background Homebrew upgrades.
 
-static NSString * const ReminderkitCurrentVersion = @"0.5.47";
+static NSString * const ReminderkitCurrentVersion = @"0.5.49";
 static NSString * const ReminderkitFormulaURL = @"https://raw.githubusercontent.com/johnmatthewtennant/homebrew-tap/master/Formula/reminderkit-cli.rb";
 static NSString * const ReminderkitFormulaTap = @"johnmatthewtennant/tap/reminderkit-cli";
 static NSString * const ReminderkitFormulaName = @"reminderkit-cli";
