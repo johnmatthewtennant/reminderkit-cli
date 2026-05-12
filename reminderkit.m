@@ -139,9 +139,7 @@ int main(int argc, const char *argv[]) {
             return 1;
         }
 
-        if ([[[NSProcessInfo processInfo] environment][@"REMINDERKIT_SELF_RESPONSIBLE"] length] > 0) {
-            reminderkit_disclaim_if_needed(argc, (char **)argv);
-        }
+        reminderkit_disclaim_if_needed(argc, (char **)argv);
 
         loadFramework();
 
