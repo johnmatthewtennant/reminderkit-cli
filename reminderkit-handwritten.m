@@ -86,6 +86,7 @@ static int cmdBatch(id store) {
     NSMutableArray *results = [NSMutableArray array];
     // Track tags added during this batch to dedupe within a single batch payload
     NSMutableDictionary *batchAddedTags = [NSMutableDictionary dictionary]; // remID -> NSMutableSet of tag names
+    NSMutableDictionary *pendingMoves = [NSMutableDictionary dictionary]; // remID -> { listName, destList }
     // Track last subtask change item per parent for ordered insertion
     NSMutableDictionary *lastSubtaskCI = [NSMutableDictionary dictionary]; // parentID -> last child change item
 
@@ -257,6 +258,7 @@ static int cmdBatch(id store) {
                 if (toListName) {
                     id destList = findList(store, toListName);
                     if (!destList) errorExit([NSString stringWithFormat:@"Destination list not found: %@", toListName]);
+                    pendingMoves[opID] = @{@"listName": toListName, @"destList": destList};
                     id destListCI = ((id (*)(id, SEL, id))objc_msgSend)(
                         saveReq, sel_registerName("updateList:"), destList);
                     // Register the reminder change item with the destination list
@@ -315,6 +317,11 @@ static int cmdBatch(id store) {
     ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    for (NSString *movedID in pendingMoves) {
+        NSDictionary *move = pendingMoves[movedID];
+        verifyReminderMovedToList(store, movedID, move[@"listName"], move[@"destList"]);
+    }
 
     printJSON(results);
     return 0;

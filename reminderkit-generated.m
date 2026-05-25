@@ -1565,6 +1565,17 @@ static int cmdCreateSection(id store, NSString *listName, NSString *sectionName)
 
 // --- Update Command (generated from REMINDER_WRITE_OPS) ---
 
+static void verifyReminderMovedToList(id store, NSString *remID, NSString *toListName, id destList) {
+    id updated = findReminderByID(store, remID);
+    if (!updated) errorExit([NSString stringWithFormat:@"Reminder not found after move: %@", remID]);
+
+    id destListID = ((id (*)(id, SEL))objc_msgSend)(destList, sel_registerName("objectID"));
+    id updatedListID = ((id (*)(id, SEL))objc_msgSend)(updated, sel_registerName("listID"));
+    if (![objectIDToString(updatedListID) isEqualToString:objectIDToString(destListID)]) {
+        errorExit([NSString stringWithFormat:@"Failed to move reminder to list '%@' — source list may be shared", toListName]);
+    }
+}
+
 static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
     NSString *remID = opts[@"id"];
     id rem = findReminderByID(store, remID);
@@ -1708,9 +1719,11 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
 
     // Move to different list: --to-list
     NSString *toListName = opts[@"to-list"];
+    id toListDest = nil;
     if (toListName) {
         id destList = findList(store, toListName);
         if (!destList) errorExit([NSString stringWithFormat:@"Destination list not found: %@", toListName]);
+        toListDest = destList;
 
         id destListCI = ((id (*)(id, SEL, id))objc_msgSend)(
             saveReq, sel_registerName("updateList:"), destList);
@@ -1724,6 +1737,8 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
     ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    if (toListName) verifyReminderMovedToList(store, remID, toListName, toListDest);
 
     // Re-fetch and return updated state
     id updated = findReminderByID(store, remID);
