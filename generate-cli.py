@@ -129,12 +129,16 @@ def generate_header():
 static Class REMStoreClass;
 static Class REMSaveRequestClass;
 static Class REMListSectionCIClass;
+static Class REMMembershipClass;
+static Class REMMembershipsClass;
 
 static void loadFramework(void) {
     [[NSBundle bundleWithPath:@"/System/Library/PrivateFrameworks/ReminderKit.framework"] load];
     REMStoreClass = NSClassFromString(@"REMStore");
     REMSaveRequestClass = NSClassFromString(@"REMSaveRequest");
     REMListSectionCIClass = NSClassFromString(@"REMListSectionChangeItem");
+    REMMembershipClass = NSClassFromString(@"REMMembership");
+    REMMembershipsClass = NSClassFromString(@"REMMemberships");
 }
 
 static void requestRemindersAccess(void) {
@@ -187,6 +191,15 @@ static BOOL parseBoolString(NSString *str) {
 static NSString *objectIDToString(id objID) {
     if (!objID) return nil;
     return [objID description];
+}
+
+static NSUUID *objectIDToNSUUID(id objID) {
+    if (!objID) return nil;
+    @try {
+        return ((id (*)(id, SEL))objc_msgSend)(objID, sel_registerName("uuid"));
+    } @catch (__unused NSException *e) {
+        return nil;
+    }
 }
 
 // --- ID Output Mode (omit-when-default, field projection, full mode) ---
@@ -1310,6 +1323,54 @@ static NSMutableArray *fetchSortedSubtasks(id store, id parentRem) {
     return subtaskRems;
 }
 
+static NSArray *fetchSections(id store, id list) {
+    id listID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
+    NSError *error = nil;
+    NSArray *sections = ((id (*)(id, SEL, id, id*))objc_msgSend)(
+        store, sel_registerName("fetchListSectionsWithListObjectID:error:"), listID, &error);
+    if (error) errorExit([NSString stringWithFormat:@"Failed to fetch sections: %@", error]);
+    return sections ?: @[];
+}
+
+static id findSection(id store, id list, NSString *sectionName) {
+    if (!list || !sectionName) return nil;
+    for (id section in fetchSections(store, list)) {
+        NSString *name = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("displayName"));
+        if (!name) name = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("canonicalName"));
+        if ([name isEqualToString:sectionName]) return section;
+    }
+    return nil;
+}
+
+static void assignReminderChangeItemToSection(id listCI, id reminderChangeItem, id section) {
+    id reminderID = ((id (*)(id, SEL))objc_msgSend)(reminderChangeItem, sel_registerName("objectID"));
+    id sectionID = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("objectID"));
+    NSUUID *reminderUUID = objectIDToNSUUID(reminderID);
+    NSUUID *sectionUUID = objectIDToNSUUID(sectionID);
+    if (!reminderUUID || !sectionUUID) errorExit(@"Could not resolve section membership IDs");
+
+    id sectionCtx = ((id (*)(id, SEL))objc_msgSend)(listCI, sel_registerName("sectionsContextChangeItem"));
+    id existing = ((id (*)(id, SEL))objc_msgSend)(sectionCtx, sel_registerName("unsavedMembershipsOfRemindersInSections"));
+    NSMutableDictionary *membershipsByReminder = [NSMutableDictionary dictionary];
+    if (existing) {
+        NSDictionary *existingDict = ((id (*)(id, SEL))objc_msgSend)(existing, sel_registerName("membershipByMemberIdentifier"));
+        if (existingDict) [membershipsByReminder addEntriesFromDictionary:existingDict];
+    }
+
+    id membership = ((id (*)(id, SEL, id, id, BOOL, id))objc_msgSend)(
+        [REMMembershipClass alloc],
+        sel_registerName("initWithMemberIdentifier:groupIdentifier:isObsolete:modifiedOn:"),
+        reminderUUID, sectionUUID, NO, [NSDate date]);
+    membershipsByReminder[reminderUUID] = membership;
+
+    id memberships = ((id (*)(id, SEL, id))objc_msgSend)(
+        [REMMembershipsClass alloc],
+        sel_registerName("initWithMembershipByMemberIdentifier:"),
+        membershipsByReminder);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        sectionCtx, sel_registerName("setUnsavedMembershipsOfRemindersInSections:"), memberships);
+}
+
 static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *opts) {
     id list = nil;
     NSString *parentID = opts[@"parent-id"];
@@ -1337,6 +1398,13 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
     }
     if (!list) errorExit(@"No list found");
 
+    NSString *sectionName = opts[@"section"];
+    id targetSection = nil;
+    if (sectionName) {
+        targetSection = findSection(store, list, sectionName);
+        if (!targetSection) errorExit([NSString stringWithFormat:@"Section not found: %@", sectionName]);
+    }
+
     // Get the list change item from save request
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
@@ -1349,6 +1417,7 @@ static int cmdAdd(id store, NSString *title, NSString *listName, NSDictionary *o
         title, listCI);
 
     if (!newRem) errorExit(@"Failed to create reminder");
+    if (targetSection) assignReminderChangeItemToSection(listCI, newRem, targetSection);
 
     // Apply optional properties
 ''' + generate_add_setters() + '''
@@ -1570,10 +1639,11 @@ static int cmdListSections(id store, NSString *listName) {
     // Try to fetch sections from the list
     NSMutableArray *result = [NSMutableArray array];
     @try {
-        id sections = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("sections"));
+        id sections = fetchSections(store, list);
         if (sections) {
             for (id section in sections) {
-                NSString *name = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("canonicalName"));
+                NSString *name = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("displayName"));
+                if (!name) name = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("canonicalName"));
                 id objID = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("objectID"));
                 NSMutableDictionary *d = [NSMutableDictionary dictionary];
                 if (name) d[@"name"] = name;
@@ -1609,11 +1679,11 @@ static int cmdCreateSection(id store, NSString *listName, NSString *sectionName)
     id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
         saveReq, sel_registerName("updateList:"), list);
 
-    // Create a new section change item
-    id newSection = ((id (*)(id, SEL, id, id, id))objc_msgSend)(
-        [REMListSectionCIClass alloc],
-        sel_registerName("initWithObjectID:displayName:insertIntoListChangeItem:"),
-        nil, sectionName, listCI);
+    id sectionCtx = ((id (*)(id, SEL))objc_msgSend)(listCI, sel_registerName("sectionsContextChangeItem"));
+    id newSection = ((id (*)(id, SEL, id, id))objc_msgSend)(
+        saveReq,
+        sel_registerName("addListSectionWithDisplayName:toListSectionContextChangeItem:"),
+        sectionName, sectionCtx);
 
     if (!newSection) errorExit(@"Failed to create section");
 
@@ -1817,6 +1887,17 @@ def generate_update_command():
     # Move to different list via --to-list
     lines.extend([
         '',
+        '    NSString *sectionName = opts[@"section"];',
+        '    id sectionDest = nil;',
+        '    id sectionList = nil;',
+        '    if (sectionName) {',
+        '        id currentListID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("listID"));',
+        '        sectionList = findListByObjectID(store, currentListID);',
+        '        if (!sectionList) errorExit(@"Could not find reminder\'s list");',
+        '        sectionDest = findSection(store, sectionList, sectionName);',
+        '        if (!sectionDest) errorExit([NSString stringWithFormat:@"Section not found: %@", sectionName]);',
+        '    }',
+        '',
         '    // Move to different list: --to-list',
         '    NSString *toListName = opts[@"to-list"];',
         '    id toListDest = nil;',
@@ -1831,6 +1912,11 @@ def generate_update_command():
         '        // Register the reminder change item with the destination list',
         '        ((void (*)(id, SEL, id))objc_msgSend)(',
         '            destListCI, sel_registerName("addReminderChangeItem:"), changeItem);',
+        '    }',
+        '    if (sectionDest) {',
+        '        id listCI = ((id (*)(id, SEL, id))objc_msgSend)(',
+        '            saveReq, sel_registerName("updateList:"), sectionList);',
+        '        assignReminderChangeItemToSection(listCI, changeItem, sectionDest);',
         '    }',
     ])
 

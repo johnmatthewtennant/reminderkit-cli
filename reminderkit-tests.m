@@ -1649,6 +1649,41 @@ static int cmdTest(id store) {
         }
     }
 
+
+    // Test: cmdAdd --section and cmdUpdate --section
+    fprintf(stderr, "Test: cmdAdd/cmdUpdate --section...\n");
+    {
+        NSString *sectionName = @"__remcli_test_section__";
+        NSString *sectionAddTitle = @"__remcli_test_section_add__";
+        NSString *sectionUpdateTitle = @"__remcli_test_section_update__";
+
+        int rs = cmdCreateSection(store, testListName, sectionName);
+        if (rs != 0) { fprintf(stderr, "  FAIL (could not create section)\n"); failed++; }
+        else {
+            id testList = findList(store, testListName);
+            id section = findSection(store, testList, sectionName);
+            if (!section) { fprintf(stderr, "  FAIL (section not found after create)\n"); failed++; }
+            else {
+                int ra = cmdAdd(store, sectionAddTitle, testListName, @{@"section": sectionName});
+                if (ra != 0) { fprintf(stderr, "  FAIL (add --section returned %d)\n", ra); failed++; }
+                else {
+                    id added = findReminder(store, sectionAddTitle, testListName);
+                    if (added) cmdDelete(store, objectIDToString(((id (*)(id, SEL))objc_msgSend)(added, sel_registerName("objectID"))));
+                    int rb = cmdAdd(store, sectionUpdateTitle, testListName, @{});
+                    if (rb != 0) { fprintf(stderr, "  FAIL (could not add update target)\n"); failed++; }
+                    else {
+                        id updateRem = findReminder(store, sectionUpdateTitle, testListName);
+                        NSString *updateID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(updateRem, sel_registerName("objectID")));
+                        int ru = cmdUpdate(store, nil, @{@"id": updateID, @"section": sectionName});
+                        if (ru != 0) { fprintf(stderr, "  FAIL (update --section returned %d)\n", ru); failed++; }
+                        else { fprintf(stderr, "  PASS\n"); passed++; }
+                        cmdDelete(store, updateID);
+                    }
+                }
+            }
+        }
+    }
+
     // Cleanup
     // Test 47: cmdDelete child
     fprintf(stderr, "Test 47: cmdDelete child...\n");

@@ -25,6 +25,8 @@ Command-line interface for Apple Reminders. Built on the private ReminderKit fra
 
 - `reminderkit lists` — list all reminder lists
 - `reminderkit add --title "Title" --list "List"` — create a reminder
+- `reminderkit add --title "Title" --list "List" --section "Section"` — create a reminder in a section
+- `reminderkit update --id <id> --section "Section"` — move a reminder into a section in its current list
 - `reminderkit complete --id <id>` — complete a reminder
 - `reminderkit list --name "List"` — list reminders in a list
 - `reminderkit list --name "List" --has-url` — list only reminders that have a URL set
