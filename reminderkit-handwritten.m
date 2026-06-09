@@ -532,6 +532,23 @@ static int cmdUnassign(id store, NSString *remID, NSString *assigneeID) {
 
 // --- Install Skill ---
 
+// Rewrite a path under Homebrew's versioned Cellar (<prefix>/Cellar/<formula>/<version>/...)
+// to the stable <prefix>/opt/<formula>/... form so installed symlinks survive upgrades.
+static NSString *stableSkillSourcePath(NSString *path) {
+    NSArray *parts = [path pathComponents];
+    NSUInteger idx = [parts indexOfObject:@"Cellar"];
+    if (idx == NSNotFound || idx + 3 > parts.count) return path;
+    NSMutableArray *out = [[parts subarrayWithRange:NSMakeRange(0, idx)] mutableCopy];
+    [out addObject:@"opt"];
+    [out addObject:parts[idx + 1]];
+    if (idx + 3 < parts.count) {
+        [out addObjectsFromArray:[parts subarrayWithRange:NSMakeRange(idx + 3, parts.count - idx - 3)]];
+    }
+    NSString *candidate = [NSString pathWithComponents:out];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:candidate]) return candidate;
+    return path;
+}
+
 static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
     char execPath[PATH_MAX];
     uint32_t size = sizeof(execPath);
@@ -549,29 +566,33 @@ static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
     NSString *binDir = [binaryPath stringByDeletingLastPathComponent];
 
     NSArray *candidates = @[
-        [[binDir stringByDeletingLastPathComponent] stringByAppendingPathComponent:@".agents/skills/apple-reminders/SKILL.md"],
-        [[binDir stringByAppendingPathComponent:@".."] stringByAppendingPathComponent:@".agents/skills/apple-reminders/SKILL.md"],
-        [binDir stringByAppendingPathComponent:@".agents/skills/apple-reminders/SKILL.md"],
+        [[binDir stringByDeletingLastPathComponent] stringByAppendingPathComponent:@".agents/skills/apple-reminders"],
+        [[binDir stringByAppendingPathComponent:@".."] stringByAppendingPathComponent:@".agents/skills/apple-reminders"],
+        [binDir stringByAppendingPathComponent:@".agents/skills/apple-reminders"],
     ];
 
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *sourcePath = nil;
+    NSString *sourceDir = nil;
     for (NSString *candidate in candidates) {
         NSString *resolved = [candidate stringByStandardizingPath];
-        if ([fm fileExistsAtPath:resolved]) {
-            sourcePath = resolved;
+        if ([fm fileExistsAtPath:[resolved stringByAppendingPathComponent:@"SKILL.md"]]) {
+            sourceDir = resolved;
             break;
         }
     }
 
-    if (!sourcePath) {
-        fprintf(stderr, "Error: could not find SKILL.md relative to binary at %s\n", realPath);
+    if (!sourceDir) {
+        fprintf(stderr, "Error: could not find skill directory relative to binary at %s\n", realPath);
         fprintf(stderr, "Searched:\n");
         for (NSString *candidate in candidates) {
             fprintf(stderr, "  %s\n", [[candidate stringByStandardizingPath] UTF8String]);
         }
         return 1;
     }
+
+    // Symlink the whole skill directory, not its SKILL.md: Codex skips skills
+    // whose SKILL.md is a file symlink, but follows directory symlinks.
+    sourceDir = stableSkillSourcePath(sourceDir);
 
     NSString *home = NSHomeDirectory();
 
@@ -582,28 +603,33 @@ static int cmdInstallSkill(BOOL installClaude, BOOL installAgents, BOOL force) {
     NSError *error = nil;
     int failures = 0;
     for (NSString *dir in targetDirs) {
-        NSString *path = [dir stringByAppendingPathComponent:@"SKILL.md"];
-        if ([fm fileExistsAtPath:path]) {
+        if ([fm attributesOfItemAtPath:dir error:nil]) {
             if (!force) {
-                fprintf(stderr, "Error: %s already exists (use --force to overwrite)\n", [path UTF8String]);
+                fprintf(stderr, "Error: %s already exists (use --force to overwrite)\n", [dir UTF8String]);
                 failures++;
                 continue;
             }
-            [fm removeItemAtPath:path error:nil];
+            if (![fm removeItemAtPath:dir error:&error]) {
+                fprintf(stderr, "Error: could not remove %s: %s\n",
+                    [dir UTF8String], [[error localizedDescription] UTF8String]);
+                failures++;
+                continue;
+            }
         }
-        if (![fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:&error]) {
+        NSString *parent = [dir stringByDeletingLastPathComponent];
+        if (![fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:&error]) {
             fprintf(stderr, "Error: could not create directory %s: %s\n",
-                [dir UTF8String], [[error localizedDescription] UTF8String]);
+                [parent UTF8String], [[error localizedDescription] UTF8String]);
             failures++;
             continue;
         }
-        if (![fm createSymbolicLinkAtPath:path withDestinationPath:sourcePath error:&error]) {
+        if (![fm createSymbolicLinkAtPath:dir withDestinationPath:sourceDir error:&error]) {
             fprintf(stderr, "Error: could not create symlink: %s\n",
                 [[error localizedDescription] UTF8String]);
             failures++;
             continue;
         }
-        printf("Installed skill: %s -> %s\n", [path UTF8String], [sourcePath UTF8String]);
+        printf("Installed skill: %s -> %s\n", [dir UTF8String], [sourceDir UTF8String]);
     }
 
     return failures > 0 ? 1 : 0;
