@@ -156,6 +156,14 @@ static int cmdTest(id store) {
     NSString *parentTitle = @"__remcli_test_parent__";
     NSString *childTitle = @"__remcli_test_child__";
 
+    // Test 0: Reminders access error classifier
+    fprintf(stderr, "Test 0a: isRemindersAccessError recognizes 4097...\n");
+    { NSError *e = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:4097 userInfo:nil]; if (isRemindersAccessError(e)) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+    fprintf(stderr, "Test 0b: isRemindersAccessError ignores other Cocoa errors...\n");
+    { NSError *e = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:1 userInfo:nil]; if (!isRemindersAccessError(e)) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+    fprintf(stderr, "Test 0c: isRemindersAccessError ignores nil...\n");
+    { if (!isRemindersAccessError(nil)) { fprintf(stderr, "  PASS\n"); passed++; } else { fprintf(stderr, "  FAIL\n"); failed++; } }
+
     // Cleanup leftover test data
     id oldList = findList(store, testListName);
     if (oldList) {

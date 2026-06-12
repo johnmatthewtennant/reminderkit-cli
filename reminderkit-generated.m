@@ -27,9 +27,13 @@ static void loadFramework(void) {
     REMMembershipsClass = NSClassFromString(@"REMMemberships");
 }
 
-static void requestRemindersAccess(void) {
+static BOOL hasRemindersAccess(void) {
     EKAuthorizationStatus status = [EKEventStore authorizationStatusForEntityType:EKEntityTypeReminder];
-    if (status == EKAuthorizationStatusAuthorized || status == EKAuthorizationStatusFullAccess) return;
+    return status == EKAuthorizationStatusAuthorized || status == EKAuthorizationStatusFullAccess;
+}
+
+static BOOL requestRemindersAccessOnce(void) {
+    if (hasRemindersAccess()) return YES;
 
     EKEventStore *eventStore = [[EKEventStore alloc] init];
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
@@ -50,10 +54,50 @@ static void requestRemindersAccess(void) {
     }
 
     dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-    if (!granted) {
-        fprintf(stderr, "Error: Reminders access denied.\n");
-        exit(1);
+    return granted;
+}
+
+static void printRemindersAccessDeniedHelp(void) {
+    fprintf(stderr, "Error: Reminders access denied.\n\n");
+    fprintf(stderr, "Your terminal app needs permission to access Reminders.\n\n");
+    fprintf(stderr, "1. Grant permission (triggers macOS prompt):\n");
+    fprintf(stderr, "   osascript -e 'tell application \"Reminders\" to get name of every list'\n\n");
+    fprintf(stderr, "2. If previously denied, reset first, then re-run step 1:\n");
+    fprintf(stderr, "   tccutil reset Reminders <bundle-id>\n\n");
+    fprintf(stderr, "   Find your terminal's bundle ID:\n");
+    fprintf(stderr, "   osascript -e 'id of app \"iTerm\"'  (replace iTerm with your terminal app name)\n\n");
+    fprintf(stderr, "3. Then retry your reminderkit command.\n");
+}
+
+static BOOL runRemindersPermissionPreflight(void) {
+    NSTask *task = [[NSTask alloc] init];
+    [task setLaunchPath:@"/usr/bin/osascript"];
+    [task setArguments:@[@"-e", @"tell application \"Reminders\" to get name of every list"]];
+    [task setStandardInput:[NSFileHandle fileHandleWithNullDevice]];
+    [task setStandardOutput:[NSFileHandle fileHandleWithNullDevice]];
+    [task setStandardError:[NSFileHandle fileHandleWithNullDevice]];
+
+    @try {
+        [task launch];
+        [task waitUntilExit];
+    } @catch (__unused NSException *exception) {
+        return NO;
     }
+    return [task terminationStatus] == 0;
+}
+
+static BOOL isRemindersAccessError(NSError *error) {
+    return [[error domain] isEqualToString:@"NSCocoaErrorDomain"] && [error code] == 4097;
+}
+
+static void requestRemindersAccess(void) {
+    if (requestRemindersAccessOnce()) return;
+
+    runRemindersPermissionPreflight();
+    if (requestRemindersAccessOnce()) return;
+
+    printRemindersAccessDeniedHelp();
+    exit(1);
 }
 
 static id getStore(void) {
@@ -407,17 +451,15 @@ static NSArray *fetchLists(id store) {
     NSError *error = nil;
     NSArray *lists = ((id (*)(id, SEL, id*))objc_msgSend)(
         store, sel_registerName("fetchEligibleDefaultListsWithError:"), &error);
+    if (error && isRemindersAccessError(error)) {
+        runRemindersPermissionPreflight();
+        error = nil;
+        lists = ((id (*)(id, SEL, id*))objc_msgSend)(
+            store, sel_registerName("fetchEligibleDefaultListsWithError:"), &error);
+    }
     if (error) {
-        if ([[error domain] isEqualToString:@"NSCocoaErrorDomain"] && [error code] == 4097) {
-            fprintf(stderr, "Error: Reminders access denied.\n\n");
-            fprintf(stderr, "Your terminal app needs permission to access Reminders.\n\n");
-            fprintf(stderr, "1. Grant permission (triggers macOS prompt):\n");
-            fprintf(stderr, "   osascript -e 'tell application \"Reminders\" to get name of every list'\n\n");
-            fprintf(stderr, "2. If previously denied, reset first, then re-run step 1:\n");
-            fprintf(stderr, "   tccutil reset Reminders <bundle-id>\n\n");
-            fprintf(stderr, "   Find your terminal's bundle ID:\n");
-            fprintf(stderr, "   osascript -e 'id of app \"iTerm\"'  (replace iTerm with your terminal app name)\n\n");
-            fprintf(stderr, "3. Then retry: reminderkit lists\n");
+        if (isRemindersAccessError(error)) {
+            printRemindersAccessDeniedHelp();
             exit(1);
         }
         errorExit([NSString stringWithFormat:@"Failed to fetch lists: %@", error]);
