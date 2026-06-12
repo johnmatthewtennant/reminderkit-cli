@@ -42,7 +42,7 @@ jobs:
 
       - name: Build binary
         if: steps.check.outputs.skip != 'true'
-        run: make
+        run: make VERSION=${{ steps.version.outputs.version }}
 
       - name: Create tag and release
         if: steps.check.outputs.skip != 'true'

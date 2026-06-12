@@ -1,5 +1,8 @@
 CC = clang
-CFLAGS = -framework Foundation -framework EventKit -lobjc -O2
+# Version embedded in the binary. The Homebrew formula passes VERSION=#{version}
+# (the release tag); local builds fall back to the latest git tag, then "dev".
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo dev)
+CFLAGS = -framework Foundation -framework EventKit -lobjc -O2 -DREMINDERKIT_VERSION='"$(VERSION)"'
 INFO_PLIST = Info.plist
 BUNDLE_ID = com.jtennant.reminderkit-cli
 INFO_PLIST_FLAGS = -Wl,-sectcreate,__TEXT,__info_plist,$(INFO_PLIST)
