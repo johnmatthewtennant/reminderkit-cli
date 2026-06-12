@@ -97,4 +97,17 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/reminderkit-cli.rb
           git commit -m "reminderkit-cli: bump to ${TAG}"
-          git push
+
+          # The tap is shared across formulae, so a concurrent release can move
+          # master between our clone and push. Rebase and retry on rejection.
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              break
+            fi
+            if [ "$attempt" = "5" ]; then
+              echo "::error::Failed to push formula bump after 5 attempts."
+              exit 1
+            fi
+            echo "Push rejected, rebasing on latest tap master (attempt $attempt)..."
+            git pull --rebase origin master
+          done
