@@ -37,6 +37,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit link-note --id <id> --note-id <note-id>\n");
     fprintf(stderr, "  reminderkit list-sections --name <list-name>\n");
     fprintf(stderr, "  reminderkit create-section --name <list-name> --section <section-name>\n");
+    fprintf(stderr, "  reminderkit delete-section --name <list-name> --section <section-name>\n");
     fprintf(stderr, "  reminderkit create-list --name <name>\n");
     fprintf(stderr, "  reminderkit rename-list --old-name <old-name> --new-name <new-name>\n");
     fprintf(stderr, "  reminderkit delete-list --name <name>\n");
@@ -120,7 +121,7 @@ int main(int argc, const char *argv[]) {
             @"lists", @"list", @"search", @"get", @"subtasks", @"add", @"update",
             @"complete", @"delete", @"batch", @"add-tag", @"remove-tag", @"assign",
             @"unassign", @"list-sharees", @"link-note", @"list-sections",
-            @"create-section", @"create-list", @"rename-list", @"delete-list",
+            @"create-section", @"delete-section", @"create-list", @"rename-list", @"delete-list",
             @"install-skill", @"version", @"test", nil];
         if (![knownCommands containsObject:command]) {
             fprintf(stderr, "Unknown command: %s\n", [command UTF8String]);
@@ -291,6 +292,10 @@ int main(int argc, const char *argv[]) {
         } else if ([command isEqualToString:@"create-section"]) {
             if (!kwName || !kwSection) { fprintf(stderr, "Error: --name and --section required\n"); usage(); return 1; }
             return cmdCreateSection(store, kwName, kwSection);
+
+        } else if ([command isEqualToString:@"delete-section"]) {
+            if (!kwName || !kwSection) { fprintf(stderr, "Error: --name and --section required\n"); usage(); return 1; }
+            return cmdDeleteSection(store, kwName, kwSection);
 
         } else if ([command isEqualToString:@"create-list"]) {
             if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }

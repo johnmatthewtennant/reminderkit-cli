@@ -1674,6 +1674,30 @@ static int cmdCreateSection(id store, NSString *listName, NSString *sectionName)
     return 0;
 }
 
+static int cmdDeleteSection(id store, NSString *listName, NSString *sectionName) {
+    id list = findList(store, listName);
+    if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
+
+    id section = findSection(store, list, sectionName);
+    if (!section) errorExit([NSString stringWithFormat:@"Section not found: %@", sectionName]);
+
+    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+
+    id sectionCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateListSection:"), section);
+
+    ((void (*)(id, SEL))objc_msgSend)(sectionCI, sel_registerName("removeFromList"));
+
+    NSError *error = nil;
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+        saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    printJSON(@{@"list": listName, @"section": sectionName, @"deleted": @YES});
+    return 0;
+}
+
 
 // --- Update Command (generated from REMINDER_WRITE_OPS) ---
 

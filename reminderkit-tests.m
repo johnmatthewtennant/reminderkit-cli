@@ -1692,6 +1692,28 @@ static int cmdTest(id store) {
         }
     }
 
+    // Test: cmdDeleteSection
+    fprintf(stderr, "Test: cmdDeleteSection...\n");
+    {
+        NSString *sectionName = @"__remcli_test_delete_section__";
+        int rc = cmdCreateSection(store, testListName, sectionName);
+        if (rc != 0) { fprintf(stderr, "  FAIL (could not create section)\n"); failed++; }
+        else {
+            id testList = findList(store, testListName);
+            id section = findSection(store, testList, sectionName);
+            if (!section) { fprintf(stderr, "  FAIL (section not found after create)\n"); failed++; }
+            else {
+                int rd = cmdDeleteSection(store, testListName, sectionName);
+                if (rd != 0) { fprintf(stderr, "  FAIL (delete-section returned %d)\n", rd); failed++; }
+                else {
+                    id deleted = findSection(store, testList, sectionName);
+                    if (!deleted) { fprintf(stderr, "  PASS\n"); passed++; }
+                    else { fprintf(stderr, "  FAIL (section still exists)\n"); failed++; }
+                }
+            }
+        }
+    }
+
     // Cleanup
     // Test 47: cmdDelete child
     fprintf(stderr, "Test 47: cmdDelete child...\n");
