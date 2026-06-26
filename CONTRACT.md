@@ -12,6 +12,7 @@ contract, not on incidental output details.
 - References to other objects use parallel keys:
     - the list reference: `listId` (bare UUID) + `listUri` (URL)
     - the parent reminder reference: `parentId` + `parentUri`
+    - the section reference, when a reminder belongs to a section: `section` (display name), `sectionId` (bare UUID), and `sectionUri` (URL)
 - Default-valued fields are OMITTED entirely to reduce output size:
 
 | field         | default | omitted when |

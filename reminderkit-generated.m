@@ -795,6 +795,28 @@ static NSMutableDictionary *reminderToDict(id rem) {
     } @catch (NSException *e) {}
 
     @try {
+        id store = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("store"));
+        id objID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));
+        if (store && objID) {
+            id view = ((id (*)(id, SEL, id))objc_msgSend)([NSClassFromString(@"REMListSectionsDataView") alloc], sel_registerName("initWithStore:"), store);
+            NSError *sectionError = nil;
+            id section = ((id (*)(id, SEL, id, id*))objc_msgSend)(view, sel_registerName("fetchListSectionWithReminderID:error:"), objID, &sectionError);
+            if (section) {
+                NSString *sectionName = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("displayName"));
+                if (!sectionName) sectionName = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("canonicalName"));
+                if (sectionName) dict[@"section"] = sectionName;
+                id sectionID = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("objectID"));
+                if (sectionID) {
+                    NSString *_uuid = objectIDToUUID(sectionID);
+                    dict[@"sectionId"] = _uuid ?: objectIDToString(sectionID);
+                    NSString *_uri = objectIDToURI(sectionID);
+                    if (_uri) dict[@"sectionUri"] = _uri;
+                }
+            }
+        }
+    } @catch (NSException *e) {}
+
+    @try {
         id attCtx = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("attachmentContext"));
         if (attCtx) {
             NSArray *urlAtts = ((id (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("urlAttachments"));
