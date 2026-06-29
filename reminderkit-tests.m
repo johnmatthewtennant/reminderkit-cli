@@ -1534,6 +1534,158 @@ static int cmdTest(id store) {
         }
     }
 
+
+    // Test: cmdUpdate --position reorders an existing subtask
+    fprintf(stderr, "Test: cmdUpdate --position reorders existing subtask...\n");
+    {
+        NSString *updatePosParent = @"__remcli_update_pos_parent__";
+        int rp = cmdAdd(store, updatePosParent, testListName, @{});
+        if (rp != 0) { fprintf(stderr, "  FAIL (add parent)\n"); failed++; }
+        else {
+            id pRem = findReminder(store, updatePosParent, testListName);
+            NSString *pID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(pRem, sel_registerName("objectID")));
+            NSString *batchJSON = [NSString stringWithFormat:
+                @"["
+                @"{\"op\":\"add\",\"title\":\"__update_pos_sub_1__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__update_pos_sub_2__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__update_pos_sub_3__\",\"parent-id\":\"%@\"}"
+                @"]", pID, pID, pID];
+            __block int rb = -1;
+            captureStdoutWithStdin(batchJSON, ^{ rb = cmdBatch(store); });
+            id sub3 = findReminder(store, @"__update_pos_sub_3__", testListName);
+            NSString *sub3ID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(sub3, sel_registerName("objectID")));
+            __block int ru = -1;
+            captureStdout(^{ ru = cmdUpdate(store, nil, @{@"id": sub3ID, @"position": @"1"}); });
+            NSData *subOut = captureStdout(^{ cmdSubtasks(store, updatePosParent, testListName); });
+            id json = parseJSONFromData(subOut);
+            NSString *firstTitle = [json isKindOfClass:[NSArray class]] && [(NSArray *)json count] > 0 ? ((NSDictionary *)json[0])[@"title"] : nil;
+            if (rb == 0 && ru == 0 && [firstTitle isEqualToString:@"__update_pos_sub_3__"]) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (first=%s rb=%d ru=%d)\n", [firstTitle UTF8String] ?: "nil", rb, ru); failed++; }
+            for (NSString *subTitle in @[@"__update_pos_sub_1__", @"__update_pos_sub_2__", @"__update_pos_sub_3__"]) {
+                id sub = findReminder(store, subTitle, testListName);
+                if (sub) cmdDelete(store, objectIDToString(((id (*)(id, SEL))objc_msgSend)(sub, sel_registerName("objectID"))));
+            }
+            cmdDelete(store, pID);
+        }
+    }
+
+    // Test: cmdUpdate --after-id reorders an existing subtask
+    fprintf(stderr, "Test: cmdUpdate --after-id reorders existing subtask...\n");
+    {
+        NSString *updateAfterParent = @"__remcli_update_after_parent__";
+        int rp = cmdAdd(store, updateAfterParent, testListName, @{});
+        if (rp != 0) { fprintf(stderr, "  FAIL (add parent)\n"); failed++; }
+        else {
+            id pRem = findReminder(store, updateAfterParent, testListName);
+            NSString *pID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(pRem, sel_registerName("objectID")));
+            NSString *batchJSON = [NSString stringWithFormat:
+                @"["
+                @"{\"op\":\"add\",\"title\":\"__update_after_sub_1__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__update_after_sub_2__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__update_after_sub_3__\",\"parent-id\":\"%@\"}"
+                @"]", pID, pID, pID];
+            __block int rb = -1;
+            captureStdoutWithStdin(batchJSON, ^{ rb = cmdBatch(store); });
+            id sub1 = findReminder(store, @"__update_after_sub_1__", testListName);
+            id sub3 = findReminder(store, @"__update_after_sub_3__", testListName);
+            NSString *sub1ID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(sub1, sel_registerName("objectID")));
+            NSString *sub3ID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(sub3, sel_registerName("objectID")));
+            __block int ru = -1;
+            captureStdout(^{ ru = cmdUpdate(store, nil, @{@"id": sub3ID, @"after-id": sub1ID}); });
+            NSData *subOut = captureStdout(^{ cmdSubtasks(store, updateAfterParent, testListName); });
+            id json = parseJSONFromData(subOut);
+            NSString *secondTitle = [json isKindOfClass:[NSArray class]] && [(NSArray *)json count] > 1 ? ((NSDictionary *)json[1])[@"title"] : nil;
+            if (rb == 0 && ru == 0 && [secondTitle isEqualToString:@"__update_after_sub_3__"]) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (second=%s rb=%d ru=%d)\n", [secondTitle UTF8String] ?: "nil", rb, ru); failed++; }
+            for (NSString *subTitle in @[@"__update_after_sub_1__", @"__update_after_sub_2__", @"__update_after_sub_3__"]) {
+                id sub = findReminder(store, subTitle, testListName);
+                if (sub) cmdDelete(store, objectIDToString(((id (*)(id, SEL))objc_msgSend)(sub, sel_registerName("objectID"))));
+            }
+            cmdDelete(store, pID);
+        }
+    }
+
+    // Test: batch update accepts JSON boolean flagged
+    fprintf(stderr, "Test: batch update accepts JSON boolean flagged...\n");
+    {
+        NSString *flagTitle = @"__remcli_batch_bool_flagged__";
+        int ra = cmdAdd(store, flagTitle, testListName, @{});
+        if (ra != 0) { fprintf(stderr, "  FAIL (add reminder)\n"); failed++; }
+        else {
+            id rem = findReminder(store, flagTitle, testListName);
+            NSString *remID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID")));
+            NSString *batchJSON = [NSString stringWithFormat:@"[{\"op\":\"update\",\"id\":\"%@\",\"flagged\":true}]", remID];
+            __block int rb = -1;
+            captureStdoutWithStdin(batchJSON, ^{ rb = cmdBatch(store); });
+            id updated = findReminderByID(store, remID);
+            NSInteger flagged = ((NSInteger (*)(id, SEL))objc_msgSend)(updated, sel_registerName("flagged"));
+            if (rb == 0 && flagged != 0) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (rb=%d flagged=%ld)\n", rb, (long)flagged); failed++; }
+            cmdDelete(store, remID);
+        }
+    }
+
+
+    // Test: cmdUpdate --position reorders top-level reminders
+    fprintf(stderr, "Test: cmdUpdate --position reorders top-level reminders...\n");
+    {
+        cmdAdd(store, @"__top_update_pos_1__", testListName, @{});
+        cmdAdd(store, @"__top_update_pos_2__", testListName, @{});
+        cmdAdd(store, @"__top_update_pos_3__", testListName, @{});
+        id rem3 = findReminder(store, @"__top_update_pos_3__", testListName);
+        NSString *rem3ID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(rem3, sel_registerName("objectID")));
+        __block int ru = -1;
+        captureStdout(^{ ru = cmdUpdate(store, nil, @{@"id": rem3ID, @"position": @"1"}); });
+        NSData *listOut = captureStdout(^{ cmdList(store, testListName, NO, nil, nil, NO, nil); });
+        id json = parseJSONFromData(listOut);
+        NSString *firstTop = nil;
+        for (NSDictionary *item in (NSArray *)json) {
+            NSString *title = item[@"title"];
+            if ([title hasPrefix:@"__top_update_pos_"]) { firstTop = title; break; }
+        }
+        if (ru == 0 && [firstTop isEqualToString:@"__top_update_pos_3__"]) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL (first=%s ru=%d)\n", [firstTop UTF8String] ?: "nil", ru); failed++; }
+        for (NSString *title in @[@"__top_update_pos_1__", @"__top_update_pos_2__", @"__top_update_pos_3__"]) {
+            id rem = findReminder(store, title, testListName);
+            if (rem) cmdDelete(store, objectIDToString(((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"))));
+        }
+    }
+
+    // Test: batch update --position reorders an existing subtask
+    fprintf(stderr, "Test: batch update --position reorders existing subtask...\n");
+    {
+        NSString *batchPosParent = @"__remcli_batch_update_pos_parent__";
+        int rp = cmdAdd(store, batchPosParent, testListName, @{});
+        if (rp != 0) { fprintf(stderr, "  FAIL (add parent)\n"); failed++; }
+        else {
+            id pRem = findReminder(store, batchPosParent, testListName);
+            NSString *pID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(pRem, sel_registerName("objectID")));
+            NSString *addJSON = [NSString stringWithFormat:
+                @"["
+                @"{\"op\":\"add\",\"title\":\"__batch_update_pos_sub_1__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__batch_update_pos_sub_2__\",\"parent-id\":\"%@\"},"
+                @"{\"op\":\"add\",\"title\":\"__batch_update_pos_sub_3__\",\"parent-id\":\"%@\"}"
+                @"]", pID, pID, pID];
+            __block int rb = -1;
+            captureStdoutWithStdin(addJSON, ^{ rb = cmdBatch(store); });
+            id sub3 = findReminder(store, @"__batch_update_pos_sub_3__", testListName);
+            NSString *sub3ID = objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(sub3, sel_registerName("objectID")));
+            NSString *updateJSON = [NSString stringWithFormat:@"[{\"op\":\"update\",\"id\":\"%@\",\"position\":\"1\"}]", sub3ID];
+            __block int ru = -1;
+            captureStdoutWithStdin(updateJSON, ^{ ru = cmdBatch(store); });
+            NSData *subOut = captureStdout(^{ cmdSubtasks(store, batchPosParent, testListName); });
+            id json = parseJSONFromData(subOut);
+            NSString *firstTitle = [json isKindOfClass:[NSArray class]] && [(NSArray *)json count] > 0 ? ((NSDictionary *)json[0])[@"title"] : nil;
+            if (rb == 0 && ru == 0 && [firstTitle isEqualToString:@"__batch_update_pos_sub_3__"]) { fprintf(stderr, "  PASS\n"); passed++; }
+            else { fprintf(stderr, "  FAIL (first=%s rb=%d ru=%d)\n", [firstTitle UTF8String] ?: "nil", rb, ru); failed++; }
+            for (NSString *subTitle in @[@"__batch_update_pos_sub_1__", @"__batch_update_pos_sub_2__", @"__batch_update_pos_sub_3__"]) {
+                id sub = findReminder(store, subTitle, testListName);
+                if (sub) cmdDelete(store, objectIDToString(((id (*)(id, SEL))objc_msgSend)(sub, sel_registerName("objectID"))));
+            }
+            cmdDelete(store, pID);
+        }
+    }
+
     // Test: cmdUpdate --to-list moves reminder between lists
     fprintf(stderr, "Test: cmdUpdate --to-list...\n");
     {

@@ -113,8 +113,10 @@ static void errorExit(NSString *msg) {
     exit(1);
 }
 
-static BOOL parseBoolString(NSString *str) {
-    NSString *lower = [str lowercaseString];
+static BOOL parseBoolString(id value) {
+    if ([value isKindOfClass:[NSNumber class]]) return [value boolValue];
+    if (![value isKindOfClass:[NSString class]]) errorExit(@"Expected boolean or boolean string");
+    NSString *lower = [(NSString *)value lowercaseString];
     return [lower isEqualToString:@"true"] || [lower isEqualToString:@"1"] || [lower isEqualToString:@"yes"];
 }
 
@@ -854,6 +856,7 @@ static void sortRemindersByListOrdering(NSMutableArray *reminders, id list);
 static void reparentChangeItemAfter(id store, id saveReq, id listCI, id childCI, NSString *parentID, id afterSiblingCI);
 static void reparentChangeItemBefore(id store, id saveReq, id listCI, id childCI, NSString *parentID, id beforeSiblingCI);
 static NSMutableArray *fetchSortedSubtasks(id store, id parentRem);
+static NSMutableArray *fetchSortedTopLevelReminders(id store, id list);
 
 // --- Commands ---
 
@@ -1292,6 +1295,22 @@ static NSMutableArray *fetchSortedSubtasks(id store, id parentRem) {
     id list = findListByObjectID(store, listID);
     if (list) sortRemindersByListOrdering(subtaskRems, list);
     return subtaskRems;
+}
+
+static NSMutableArray *fetchSortedTopLevelReminders(id store, id list) {
+    id listID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
+    NSError *error = nil;
+    NSArray *allInList = ((id (*)(id, SEL, id, id*))objc_msgSend)(
+        store, sel_registerName("fetchRemindersForEventKitBridgingWithListIDs:error:"),
+        @[listID], &error);
+
+    NSMutableArray *topLevelRems = [NSMutableArray array];
+    for (id rem in allInList) {
+        id pid = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("parentReminderID"));
+        if (!pid) [topLevelRems addObject:rem];
+    }
+    sortRemindersByListOrdering(topLevelRems, list);
+    return topLevelRems;
 }
 
 static NSArray *fetchSections(id store, id list) {
@@ -1810,25 +1829,37 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
         ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));
     }
 
-    // Reparent: --parent-id (with optional --after-id or --position for ordering)
-    if (parentID) {
-        NSString *afterID = opts[@"after-id"];
-        NSString *positionStr = opts[@"position"];
-        if (afterID && positionStr) {
-            errorExit(@"Cannot specify both --after-id and --position");
-        }
+    NSString *afterID = opts[@"after-id"];
+    NSString *positionStr = opts[@"position"];
+    if (afterID && positionStr) {
+        errorExit(@"Cannot specify both --after-id and --position");
+    }
 
-        // Validate no self-parenting (update-specific)
+    // Reparent/reorder: --parent-id, --after-id, or --position
+    if (parentID || afterID || positionStr) {
         id remObjID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("objectID"));
         NSString *remObjIDStr = objectIDToString(remObjID);
-        id parentRem = findReminderByID(store, parentID);
-        if (!parentRem) errorExit([NSString stringWithFormat:@"Parent not found with id: %@", parentID]);
-        id parentObjID = ((id (*)(id, SEL))objc_msgSend)(parentRem, sel_registerName("objectID"));
-        if ([remObjIDStr isEqualToString:objectIDToString(parentObjID)]) {
-            errorExit(@"Cannot set a reminder as its own parent");
+        id parentRem = nil;
+        NSString *effectiveParentID = parentID;
+        BOOL reorderTopLevel = NO;
+        if (parentID) {
+            parentRem = findReminderByID(store, parentID);
+            if (!parentRem) errorExit([NSString stringWithFormat:@"Parent not found with id: %@", parentID]);
+            id parentObjID = ((id (*)(id, SEL))objc_msgSend)(parentRem, sel_registerName("objectID"));
+            if ([remObjIDStr isEqualToString:objectIDToString(parentObjID)]) {
+                errorExit(@"Cannot set a reminder as its own parent");
+            }
+        } else {
+            id existingParentID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("parentReminderID"));
+            if (existingParentID) {
+                effectiveParentID = objectIDToUUID(existingParentID) ?: objectIDToString(existingParentID);
+                parentRem = findReminderByID(store, effectiveParentID);
+                if (!parentRem) errorExit(@"Could not find parent reminder for reordering");
+            } else {
+                reorderTopLevel = YES;
+            }
         }
 
-        // Get the list for reparenting using shared helper
         id remListID = ((id (*)(id, SEL))objc_msgSend)(rem, sel_registerName("listID"));
         id targetList = findListByObjectID(store, remListID);
         if (!targetList) errorExit(@"Could not find list for reparenting");
@@ -1837,18 +1868,32 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
             saveReq, sel_registerName("updateList:"), targetList);
 
         if (afterID) {
+            if ([afterID isEqualToString:remObjIDStr]) errorExit(@"Cannot position a reminder after itself");
             id afterRem = findReminderByID(store, afterID);
             if (!afterRem) errorExit([NSString stringWithFormat:@"Sibling not found with id: %@", afterID]);
-            id afterCI = ((id (*)(id, SEL, id))objc_msgSend)(
-                saveReq, sel_registerName("updateReminder:"), afterRem);
-            reparentChangeItemAfter(store, saveReq, listCI, changeItem, parentID, afterCI);
+            id afterParentID = ((id (*)(id, SEL))objc_msgSend)(afterRem, sel_registerName("parentReminderID"));
+            if (reorderTopLevel) {
+                id afterListID = ((id (*)(id, SEL))objc_msgSend)(afterRem, sel_registerName("listID"));
+                if (afterParentID || ![objectIDToString(afterListID) isEqualToString:objectIDToString(remListID)]) {
+                    errorExit(@"--after-id must reference a top-level reminder in the same list");
+                }
+                id afterCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                    saveReq, sel_registerName("updateReminder:"), afterRem);
+                ((void (*)(id, SEL, id, id))objc_msgSend)(
+                    listCI, sel_registerName("insertReminderChangeItem:afterReminderChangeItem:"), changeItem, afterCI);
+            } else {
+                if (!afterParentID || ![(objectIDToUUID(afterParentID) ?: objectIDToString(afterParentID)) isEqualToString:effectiveParentID]) {
+                    errorExit(@"--after-id must reference a sibling reminder");
+                }
+                id afterCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                    saveReq, sel_registerName("updateReminder:"), afterRem);
+                reparentChangeItemAfter(store, saveReq, listCI, changeItem, effectiveParentID, afterCI);
+            }
         } else if (positionStr) {
             NSInteger pos = [positionStr integerValue];
             if (pos < 1) errorExit(@"--position must be >= 1");
 
-            // Fetch siblings and exclude self so position is computed
-            // against the OTHER children of the parent.
-            NSMutableArray *allSiblings = fetchSortedSubtasks(store, parentRem);
+            NSMutableArray *allSiblings = reorderTopLevel ? fetchSortedTopLevelReminders(store, targetList) : fetchSortedSubtasks(store, parentRem);
             NSMutableArray *siblings = [NSMutableArray array];
             for (id s in allSiblings) {
                 id sID = ((id (*)(id, SEL))objc_msgSend)(s, sel_registerName("objectID"));
@@ -1861,17 +1906,32 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
                 id firstSibling = siblings[0];
                 id firstCI = ((id (*)(id, SEL, id))objc_msgSend)(
                     saveReq, sel_registerName("updateReminder:"), firstSibling);
-                reparentChangeItemBefore(store, saveReq, listCI, changeItem, parentID, firstCI);
+                if (reorderTopLevel) {
+                    ((void (*)(id, SEL, id, id))objc_msgSend)(
+                        listCI, sel_registerName("insertReminderChangeItem:beforeReminderChangeItem:"), changeItem, firstCI);
+                } else {
+                    reparentChangeItemBefore(store, saveReq, listCI, changeItem, effectiveParentID, firstCI);
+                }
             } else if (pos - 1 <= (NSInteger)siblings.count) {
                 id prevSibling = siblings[pos - 2];
                 id prevCI = ((id (*)(id, SEL, id))objc_msgSend)(
                     saveReq, sel_registerName("updateReminder:"), prevSibling);
-                reparentChangeItemAfter(store, saveReq, listCI, changeItem, parentID, prevCI);
+                if (reorderTopLevel) {
+                    ((void (*)(id, SEL, id, id))objc_msgSend)(
+                        listCI, sel_registerName("insertReminderChangeItem:afterReminderChangeItem:"), changeItem, prevCI);
+                } else {
+                    reparentChangeItemAfter(store, saveReq, listCI, changeItem, effectiveParentID, prevCI);
+                }
             } else {
-                reparentChangeItem(store, saveReq, listCI, changeItem, parentID);
+                if (reorderTopLevel) {
+                    ((void (*)(id, SEL, id))objc_msgSend)(
+                        listCI, sel_registerName("addReminderChangeItem:"), changeItem);
+                } else {
+                    reparentChangeItem(store, saveReq, listCI, changeItem, effectiveParentID);
+                }
             }
         } else {
-            reparentChangeItem(store, saveReq, listCI, changeItem, parentID);
+            reparentChangeItem(store, saveReq, listCI, changeItem, effectiveParentID);
         }
     }
 
