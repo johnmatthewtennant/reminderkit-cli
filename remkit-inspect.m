@@ -35,6 +35,8 @@ int main() {
             @"REMSaveRequest", @"REMReminderChangeItem",
             @"REMHashtag", @"REMHashtagLabel",
             @"REMListSection", @"REMReminderSubtaskContextChangeItem",
+            @"REMListSectionContext", @"REMListSectionContextChangeItem",
+            @"REMListSectionChangeItem",
             @"REMAccountChangeItem", @"REMAccountGroupContext",
             @"REMAccountGroupContextChangeItem", @"REMListSublistContext",
             @"REMListSublistContextChangeItem", @"REMListStorage",
@@ -71,6 +73,8 @@ int main() {
 
         NSArray *additionalMethodClasses = @[
             @"REMStore", @"REMAccount", @"REMAccountChangeItem",
+            @"REMListSection", @"REMListSectionContext",
+            @"REMListSectionContextChangeItem", @"REMListSectionChangeItem",
             @"REMAccountGroupContext", @"REMAccountGroupContextChangeItem",
             @"REMListSublistContext", @"REMListSublistContextChangeItem",
             @"REMListStorage", @"REMListAppearanceContext",

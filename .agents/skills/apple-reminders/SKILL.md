@@ -44,6 +44,15 @@ reminderkit set-list-view --name <list-name> --view columns
 is `list`; without `--fields` or `--full`, that default is omitted from JSON,
 while the non-default `columns` value is included.
 
+## Sections
+
+Reorder a list's sections (the columns in Columns view) using a one-based
+position:
+
+```bash
+reminderkit move-section --name <list-name> --section <section-name> --position <N>
+```
+
 ## `reminderkit --help` (auto-executed)
 
 !`reminderkit --help 2>&1`

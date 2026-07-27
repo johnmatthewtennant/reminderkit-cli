@@ -1456,6 +1456,26 @@ static id findSection(id store, id list, NSString *sectionName) {
     return nil;
 }
 
+static NSArray *sectionIDsByMovingSection(NSArray *sections, id section, NSInteger position) {
+    NSMutableArray *orderedIDs = [NSMutableArray arrayWithCapacity:sections.count];
+    NSString *targetIDString = objectIDToString(
+        ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("objectID")));
+    id targetID = nil;
+    for (id candidate in sections) {
+        id candidateID = ((id (*)(id, SEL))objc_msgSend)(
+            candidate, sel_registerName("objectID"));
+        if (!candidateID) errorExit(@"Could not resolve section ordering IDs");
+        if ([objectIDToString(candidateID) isEqualToString:targetIDString]) {
+            targetID = candidateID;
+        } else {
+            [orderedIDs addObject:candidateID];
+        }
+    }
+    if (!targetID) errorExit(@"Section was not present in its list");
+    [orderedIDs insertObject:targetID atIndex:(NSUInteger)(position - 1)];
+    return orderedIDs;
+}
+
 static void assignReminderChangeItemToSection(id listCI, id reminderChangeItem, id section) {
     id reminderID = ((id (*)(id, SEL))objc_msgSend)(reminderChangeItem, sel_registerName("objectID"));
     id sectionID = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("objectID"));
@@ -1836,6 +1856,62 @@ static int cmdCreateSection(id store, NSString *listName, NSString *sectionName)
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
     printJSON(@{@"list": listName, @"section": sectionName, @"created": @YES});
+    return 0;
+}
+
+static int cmdMoveSection(id store, NSString *listName, NSString *sectionName, NSInteger position) {
+    id list = findList(store, listName);
+    if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
+
+    NSArray *sections = fetchSections(store, list);
+    id section = findSection(store, list, sectionName);
+    if (!section) errorExit([NSString stringWithFormat:@"Section not found: %@", sectionName]);
+    if (position < 1 || position > (NSInteger)sections.count) {
+        errorExit([NSString stringWithFormat:@"Position must be between 1 and %lu",
+            (unsigned long)sections.count]);
+    }
+
+    id sectionID = ((id (*)(id, SEL))objc_msgSend)(section, sel_registerName("objectID"));
+    NSString *sectionIDString = objectIDToString(sectionID);
+    NSUInteger currentIndex = [sections indexOfObjectPassingTest:
+        ^BOOL(id candidate, NSUInteger idx, BOOL *stop) {
+            id candidateID = ((id (*)(id, SEL))objc_msgSend)(
+                candidate, sel_registerName("objectID"));
+            return [objectIDToString(candidateID) isEqualToString:sectionIDString];
+        }];
+    if (currentIndex == NSNotFound) errorExit(@"Section was not present in its list");
+
+    BOOL moved = currentIndex != (NSUInteger)(position - 1);
+    if (moved) {
+        id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+            [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+        id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
+            saveReq, sel_registerName("updateList:"), list);
+        id sectionCtx = ((id (*)(id, SEL))objc_msgSend)(
+            listCI, sel_registerName("sectionsContextChangeItem"));
+        SEL setOrdering = sel_registerName("setUnsavedSectionIDsOrdering:");
+        SEL markOrdering = sel_registerName("setShouldUpdateSectionsOrdering:");
+        if (![sectionCtx respondsToSelector:setOrdering]
+            || ![sectionCtx respondsToSelector:markOrdering]) {
+            errorExit(@"This macOS version does not expose native section reordering");
+        }
+
+        NSArray *orderedIDs = sectionIDsByMovingSection(sections, section, position);
+        ((void (*)(id, SEL, id))objc_msgSend)(sectionCtx, setOrdering, orderedIDs);
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(sectionCtx, markOrdering, YES);
+
+        NSError *error = nil;
+        ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+            saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+        if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+    }
+
+    printJSON(@{
+        @"list": listName,
+        @"section": sectionName,
+        @"position": @(position),
+        @"moved": @(moved)
+    });
     return 0;
 }
 

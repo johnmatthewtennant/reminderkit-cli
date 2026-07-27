@@ -1844,6 +1844,72 @@ static int cmdTest(id store) {
         }
     }
 
+    // Test: cmdMoveSection reorders natively and is idempotent
+    fprintf(stderr, "Test: cmdMoveSection ordering and idempotency...\n");
+    {
+        NSString *firstName = @"__remcli_move_section_first__";
+        NSString *secondName = @"__remcli_move_section_second__";
+        NSString *thirdName = @"__remcli_move_section_third__";
+        int r1 = cmdCreateSection(store, testListName, firstName);
+        int r2 = cmdCreateSection(store, testListName, secondName);
+        int r3 = cmdCreateSection(store, testListName, thirdName);
+        id testList = findList(store, testListName);
+        NSArray *before = fetchSections(store, testList);
+        NSInteger targetPosition = (NSInteger)before.count - 2;
+
+        __block int moveResult = -1;
+        NSData *moveOut = captureStdout(^{
+            moveResult = cmdMoveSection(store, testListName, thirdName, targetPosition);
+        });
+        NSDictionary *moveJSON = parseJSONFromData(moveOut);
+        NSArray *after = fetchSections(store, testList);
+        id movedSection = targetPosition > 0 && targetPosition <= (NSInteger)after.count
+            ? after[(NSUInteger)(targetPosition - 1)] : nil;
+        NSString *movedName = movedSection
+            ? ((id (*)(id, SEL))objc_msgSend)(movedSection, sel_registerName("displayName"))
+            : nil;
+
+        __block int noopResult = -1;
+        NSData *noopOut = captureStdout(^{
+            noopResult = cmdMoveSection(store, testListName, thirdName, targetPosition);
+        });
+        NSDictionary *noopJSON = parseJSONFromData(noopOut);
+
+        BOOL ok = r1 == 0 && r2 == 0 && r3 == 0
+            && moveResult == 0
+            && [movedName isEqualToString:thirdName]
+            && [moveJSON[@"position"] integerValue] == targetPosition
+            && [moveJSON[@"moved"] boolValue]
+            && noopResult == 0
+            && ![noopJSON[@"moved"] boolValue];
+        if (ok) { fprintf(stderr, "  PASS\n"); passed++; }
+        else {
+            fprintf(stderr, "  FAIL (created=%d/%d/%d move=%d noop=%d position=%ld name=%s)\n",
+                r1, r2, r3, moveResult, noopResult, (long)targetPosition,
+                [movedName UTF8String] ?: "(nil)");
+            failed++;
+        }
+
+        for (NSString *sectionName in @[firstName, secondName, thirdName]) {
+            if (findSection(store, testList, sectionName)) {
+                cmdDeleteSection(store, testListName, sectionName);
+            }
+        }
+    }
+
+    fprintf(stderr, "Test: move-section rejects an out-of-range position...\n");
+    {
+        const char *args[] = {
+            "move-section", "--name", [testListName UTF8String],
+            "--section", "__remcli_test_section__", "--position", "999", NULL
+        };
+        if (assertCliExitsNonZero("move-section out of range", args)) {
+            fprintf(stderr, "  PASS\n"); passed++;
+        } else {
+            fprintf(stderr, "  FAIL\n"); failed++;
+        }
+    }
+
     // Test: cmdDeleteSection
     fprintf(stderr, "Test: cmdDeleteSection...\n");
     {
