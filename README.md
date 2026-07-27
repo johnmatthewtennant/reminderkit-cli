@@ -19,12 +19,13 @@ reminderkit install-skill
 
 ```
 reminderkit lists
-reminderkit folders
-reminderkit create-folder --name <name>
-reminderkit rename-folder --old-name <old-name> --new-name <new-name>
-reminderkit delete-folder --name <name>       # folder must be empty
-reminderkit move-list --name <list> --folder <folder>
-reminderkit move-list --name <list> --remove-from-folder
+reminderkit groups
+reminderkit create-group --name <name>
+reminderkit rename-group --old-name <old-name> --new-name <new-name>
+reminderkit move-group --name <name> --position <N>
+reminderkit move-list --name <list> --group <group> [--position <N>]
+reminderkit move-list --name <list> --remove-from-group
+reminderkit delete-group --name <name> [--keep-lists | --delete-lists]
 reminderkit list (<name> | --name <name>)
 reminderkit get (<title> | --title <title>) [--list <name>]
 reminderkit add (<title> | --title <title>) [--list <name>] [--notes <value>]
@@ -38,7 +39,7 @@ reminderkit --help                         # full usage
 
 ## Output shape
 
-By default, every command that emits a reminder/folder/list JSON object produces a
+By default, every command that emits a reminder/group/list JSON object produces a
 token-efficient shape:
 
 - **IDs are bare UUIDs** (36 chars). The full `x-apple-reminderkit://...`
@@ -49,9 +50,9 @@ token-efficient shape:
   `allDay=false`, `completed=false`, `flagged=0`, `isOverdue=false`,
   `isRecurrent=false`, `priority=0`, and empty `hashtags` are NOT emitted.
   Non-default values are always included.
-- **Folder membership is explicit** on list objects as `folder` (name),
-  `folderId` (UUID), and `folderUri` (URL). `folders` returns a `lists` array
-  for each folder.
+- **Group membership is explicit** on list objects as `group` (name),
+  `groupId` (UUID), and `groupUri` (URL). `groups` returns an ordered `lists`
+  array for each group.
 
 Two flags shape the output further (accepted by any command that produces JSON):
 

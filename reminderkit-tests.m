@@ -1866,73 +1866,163 @@ static int cmdTest(id store) {
         }
     }
 
-    // Folder/group lifecycle and list membership. These objects are temporary
+    // Group lifecycle and list membership. These objects are temporary
     // and are always moved back to the account root before deletion.
-    fprintf(stderr, "Test: folder lifecycle and list membership...\n");
+    fprintf(stderr, "Test: group lifecycle and list membership...\n");
     {
-        NSString *folderName = @"__remcli_test_folder__";
-        NSString *renamedFolderName = @"__remcli_test_folder_renamed__";
-        NSString *folderListName = @"__remcli_test_folder_list__";
+        NSString *groupName = @"__remcli_test_group__";
+        NSString *renamedGroupName = @"__remcli_test_group_renamed__";
+        NSString *groupListName = @"__remcli_test_group_list__";
 
         // Clean up leftovers from an interrupted prior run.
-        id leftoverList = findList(store, folderListName);
+        id leftoverList = findList(store, groupListName);
         if (leftoverList) {
             id parent = ((id (*)(id, SEL))objc_msgSend)(leftoverList, sel_registerName("parentList"));
-            if (parent && listIsGroup(parent)) cmdMoveList(store, folderListName, nil);
-            cmdDeleteList(store, folderListName);
+            if (parent && listIsGroup(parent)) cmdMoveList(store, groupListName, nil, 0);
+            cmdDeleteList(store, groupListName);
         }
-        for (NSString *leftoverName in @[folderName, renamedFolderName]) {
-            id leftoverFolder = findFolder(store, leftoverName);
-            if (leftoverFolder && fetchChildLists(leftoverFolder).count == 0) {
-                cmdDeleteFolder(store, leftoverName);
+        for (NSString *leftoverName in @[groupName, renamedGroupName]) {
+            id leftoverGroup = findGroup(store, leftoverName);
+            if (leftoverGroup && fetchChildLists(leftoverGroup).count == 0) {
+                cmdDeleteGroup(store, leftoverName, NO, NO);
             }
         }
 
-        int rCreateFolder = cmdCreateFolder(store, folderName);
-        int rCreateList = cmdCreateList(store, folderListName);
-        int rMoveIn = cmdMoveList(store, folderListName, folderName);
-        id groupedList = findList(store, folderListName);
+        int rCreateGroup = cmdCreateGroup(store, groupName);
+        int rCreateList = cmdCreateList(store, groupListName);
+        int rMoveIn = cmdMoveList(store, groupListName, groupName, 0);
+        id groupedList = findList(store, groupListName);
         id groupedParent = groupedList
             ? ((id (*)(id, SEL))objc_msgSend)(groupedList, sel_registerName("parentList"))
             : nil;
-        BOOL movedIn = groupedParent && [listName(groupedParent) isEqualToString:folderName];
+        BOOL movedIn = groupedParent && [listName(groupedParent) isEqualToString:groupName];
 
-        __block int rFolders = -1;
-        NSData *foldersOut = captureStdout(^{ rFolders = cmdFolders(store); });
-        NSArray *foldersJSON = parseJSONFromData(foldersOut);
-        NSDictionary *folderJSON = [foldersJSON isKindOfClass:[NSArray class]]
-            ? jsonArrayFind(foldersJSON, @"name", folderName)
+        __block int rGroups = -1;
+        NSData *groupsOut = captureStdout(^{ rGroups = cmdGroups(store); });
+        NSArray *groupsJSON = parseJSONFromData(groupsOut);
+        NSDictionary *groupJSON = [groupsJSON isKindOfClass:[NSArray class]]
+            ? jsonArrayFind(groupsJSON, @"name", groupName)
             : nil;
-        BOOL folderJSONValid = folderJSON[@"id"] && folderJSON[@"uri"]
-            && [folderJSON[@"lists"] isKindOfClass:[NSArray class]]
-            && jsonArrayFind(folderJSON[@"lists"], @"name", folderListName);
+        BOOL groupJSONValid = groupJSON[@"id"] && groupJSON[@"uri"]
+            && [groupJSON[@"lists"] isKindOfClass:[NSArray class]]
+            && jsonArrayFind(groupJSON[@"lists"], @"name", groupListName);
 
-        int rRename = cmdRenameFolder(store, folderName, renamedFolderName);
-        id renamedFolder = findFolder(store, renamedFolderName);
-        int rMoveOut = cmdMoveList(store, folderListName, nil);
-        id ungroupedList = findList(store, folderListName);
+        int rRename = cmdRenameGroup(store, groupName, renamedGroupName);
+        id renamedGroup = findGroup(store, renamedGroupName);
+        int rMoveOut = cmdMoveList(store, groupListName, nil, 0);
+        id ungroupedList = findList(store, groupListName);
         id ungroupedParent = ungroupedList
             ? ((id (*)(id, SEL))objc_msgSend)(ungroupedList, sel_registerName("parentList"))
             : nil;
         BOOL movedOut = !(ungroupedParent && listIsGroup(ungroupedParent));
 
-        int rDeleteFolder = cmdDeleteFolder(store, renamedFolderName);
-        int rDeleteList = cmdDeleteList(store, folderListName);
-        BOOL cleaned = !findFolder(store, renamedFolderName) && !findList(store, folderListName);
+        int rDeleteGroup = cmdDeleteGroup(store, renamedGroupName, NO, NO);
+        int rDeleteList = cmdDeleteList(store, groupListName);
+        BOOL cleaned = !findGroup(store, renamedGroupName) && !findList(store, groupListName);
 
-        BOOL ok = rCreateFolder == 0 && rCreateList == 0 && rMoveIn == 0
-            && movedIn && rFolders == 0 && folderJSONValid
-            && rRename == 0 && renamedFolder
+        BOOL ok = rCreateGroup == 0 && rCreateList == 0 && rMoveIn == 0
+            && movedIn && rGroups == 0 && groupJSONValid
+            && rRename == 0 && renamedGroup
             && rMoveOut == 0 && movedOut
-            && rDeleteFolder == 0 && rDeleteList == 0 && cleaned;
+            && rDeleteGroup == 0 && rDeleteList == 0 && cleaned;
         if (ok) { fprintf(stderr, "  PASS\n"); passed++; }
         else {
-            fprintf(stderr, "  FAIL (createFolder=%d createList=%d moveIn=%d movedIn=%d folders=%d json=%d rename=%d renamed=%d moveOut=%d movedOut=%d deleteFolder=%d deleteList=%d cleaned=%d)\n",
-                rCreateFolder, rCreateList, rMoveIn, movedIn, rFolders, folderJSONValid,
-                rRename, renamedFolder != nil, rMoveOut, movedOut,
-                rDeleteFolder, rDeleteList, cleaned);
+            fprintf(stderr, "  FAIL (createGroup=%d createList=%d moveIn=%d movedIn=%d groups=%d json=%d rename=%d renamed=%d moveOut=%d movedOut=%d deleteGroup=%d deleteList=%d cleaned=%d)\n",
+                rCreateGroup, rCreateList, rMoveIn, movedIn, rGroups, groupJSONValid,
+                rRename, renamedGroup != nil, rMoveOut, movedOut,
+                rDeleteGroup, rDeleteList, cleaned);
             failed++;
         }
+    }
+
+    fprintf(stderr, "Test: group and child-list ordering...\n");
+    {
+        NSString *groupA = @"__remcli_order_group_a__";
+        NSString *groupB = @"__remcli_order_group_b__";
+        NSString *listA = @"__remcli_order_list_a__";
+        NSString *listB = @"__remcli_order_list_b__";
+        NSString *listC = @"__remcli_order_list_c__";
+        for (NSString *oldGroupName in @[groupA, groupB]) {
+            id oldGroup = findGroup(store, oldGroupName);
+            if (oldGroup) cmdDeleteGroup(store, oldGroupName, NO, YES);
+        }
+        for (NSString *oldListName in @[listA, listB, listC]) {
+            id oldList = findList(store, oldListName);
+            if (oldList) cmdDeleteList(store, oldListName);
+        }
+
+        int rga = cmdCreateGroup(store, groupA);
+        int rgb = cmdCreateGroup(store, groupB);
+        int rmg = cmdMoveGroup(store, groupB, 1);
+        NSArray *orderedGroups = fetchGroups(store);
+        NSUInteger indexA = NSNotFound, indexB = NSNotFound;
+        for (NSUInteger i = 0; i < orderedGroups.count; i++) {
+            NSString *candidate = listName(orderedGroups[i]);
+            if ([candidate isEqualToString:groupA]) indexA = i;
+            if ([candidate isEqualToString:groupB]) indexB = i;
+        }
+        BOOL groupOrderOK = indexB != NSNotFound && indexA != NSNotFound && indexB < indexA;
+
+        int rla = cmdCreateList(store, listA);
+        int rlb = cmdCreateList(store, listB);
+        int rlc = cmdCreateList(store, listC);
+        int rma = cmdMoveList(store, listA, groupA, 0);
+        int rmb = cmdMoveList(store, listB, groupA, 0);
+        int rmc = cmdMoveList(store, listC, groupA, 1);
+        id orderedGroup = findGroup(store, groupA);
+        NSArray *orderedLists = fetchChildLists(orderedGroup);
+        BOOL listOrderOK = orderedLists.count == 3
+            && [listName(orderedLists[0]) isEqualToString:listC]
+            && [listName(orderedLists[1]) isEqualToString:listA]
+            && [listName(orderedLists[2]) isEqualToString:listB];
+
+        int rdg = cmdDeleteGroup(store, groupA, YES, NO);
+        BOOL keptLists = !findGroup(store, groupA);
+        for (NSString *keptName in @[listA, listB, listC]) {
+            id kept = findList(store, keptName);
+            id parent = kept ? ((id (*)(id, SEL))objc_msgSend)(kept, sel_registerName("parentList")) : nil;
+            if (!kept || (parent && listIsGroup(parent))) keptLists = NO;
+            if (kept) cmdDeleteList(store, keptName);
+        }
+        int rdb = cmdDeleteGroup(store, groupB, NO, NO);
+
+        BOOL ok = rga == 0 && rgb == 0 && rmg == 0 && groupOrderOK
+            && rla == 0 && rlb == 0 && rlc == 0
+            && rma == 0 && rmb == 0 && rmc == 0 && listOrderOK
+            && rdg == 0 && keptLists && rdb == 0;
+        if (ok) { fprintf(stderr, "  PASS\n"); passed++; }
+        else {
+            fprintf(stderr, "  FAIL (groupOrder=%d listOrder=%d keptLists=%d)\n",
+                groupOrderOK, listOrderOK, keptLists);
+            failed++;
+        }
+    }
+
+    fprintf(stderr, "Test: delete non-empty group and its lists...\n");
+    {
+        NSString *groupName = @"__remcli_delete_group__";
+        NSString *listNameValue = @"__remcli_delete_group_list__";
+        NSString *reminderTitle = @"__remcli_delete_group_reminder__";
+        id oldGroup = findGroup(store, groupName);
+        if (oldGroup) cmdDeleteGroup(store, groupName, NO, YES);
+        id oldList = findList(store, listNameValue);
+        if (oldList) cmdDeleteList(store, listNameValue);
+
+        int rg = cmdCreateGroup(store, groupName);
+        int rl = cmdCreateList(store, listNameValue);
+        int rm = cmdMoveList(store, listNameValue, groupName, 0);
+        int rr = cmdAdd(store, reminderTitle, listNameValue, @{});
+        id reminder = findReminder(store, reminderTitle, listNameValue);
+        NSString *reminderID = reminder
+            ? objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(reminder, sel_registerName("objectID")))
+            : nil;
+        int rd = cmdDeleteGroup(store, groupName, NO, YES);
+        BOOL removed = !findGroup(store, groupName)
+            && !findList(store, listNameValue)
+            && (!reminderID || !findReminderByID(store, reminderID));
+        BOOL ok = rg == 0 && rl == 0 && rm == 0 && rr == 0 && reminderID && rd == 0 && removed;
+        if (ok) { fprintf(stderr, "  PASS\n"); passed++; }
+        else { fprintf(stderr, "  FAIL (removed=%d)\n", removed); failed++; }
     }
 
     // Cleanup
@@ -1964,4 +2054,3 @@ static int cmdTest(id store) {
     fprintf(stderr, "\nResults: %d passed, %d failed\n", passed, failed);
     return failed > 0 ? 1 : 0;
 }
-

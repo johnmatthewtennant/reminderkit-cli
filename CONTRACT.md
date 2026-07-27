@@ -1,7 +1,7 @@
 # reminderkit-cli output contract
 
 This document specifies the shape of the JSON emitted by every command that
-returns a reminder, folder, list, or section. Scripts and agents should rely on this
+returns a reminder, group, list, or section. Scripts and agents should rely on this
 contract, not on incidental output details.
 
 ## Default (v2) output
@@ -13,9 +13,9 @@ contract, not on incidental output details.
     - the list reference: `listId` (bare UUID) + `listUri` (URL)
     - the parent reminder reference: `parentId` + `parentUri`
     - the section reference, when a reminder belongs to a section: `section` (display name), `sectionId` (bare UUID), and `sectionUri` (URL)
-    - the folder reference, when a list belongs to a folder: `folder` (display
-      name), `folderId` (bare UUID), and `folderUri` (URL)
-- Folder objects use the same `name`, `id`, and `uri` identity fields as list
+    - the group reference, when a list belongs to a group: `group` (display
+      name), `groupId` (bare UUID), and `groupUri` (URL)
+- Group objects use the same `name`, `id`, and `uri` identity fields as list
   objects and include a `lists` array containing their child list objects.
 - Default-valued fields are OMITTED entirely to reduce output size:
 

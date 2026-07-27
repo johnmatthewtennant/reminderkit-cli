@@ -601,38 +601,38 @@ static NSArray *fetchAccounts(id store) {
     return accounts ?: @[];
 }
 
-static NSArray *fetchFolders(id store) {
-    NSMutableArray *folders = [NSMutableArray array];
+static NSArray *fetchGroups(id store) {
+    NSMutableArray *groups = [NSMutableArray array];
     for (id account in fetchAccounts(store)) {
         id groupContext = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("groupContext"));
         NSError *error = nil;
-        NSArray *accountFolders = ((id (*)(id, SEL, id*))objc_msgSend)(
+        NSArray *accountGroups = ((id (*)(id, SEL, id*))objc_msgSend)(
             groupContext, sel_registerName("fetchGroupsWithError:"), &error);
-        if (error) errorExit([NSString stringWithFormat:@"Failed to fetch folders: %@", error]);
-        if (accountFolders) [folders addObjectsFromArray:accountFolders];
+        if (error) errorExit([NSString stringWithFormat:@"Failed to fetch groups: %@", error]);
+        if (accountGroups) [groups addObjectsFromArray:accountGroups];
     }
-    return folders;
+    return groups;
 }
 
-static id findFolder(id store, NSString *name) {
-    NSArray *folders = fetchFolders(store);
-    for (id folder in folders) {
-        NSString *candidateName = listName(folder);
-        if ([candidateName isEqualToString:name]) return folder;
+static id findGroup(id store, NSString *name) {
+    NSArray *groups = fetchGroups(store);
+    for (id group in groups) {
+        NSString *candidateName = listName(group);
+        if ([candidateName isEqualToString:name]) return group;
     }
     NSString *normalizedName = normalizeQuotes(name);
-    for (id folder in folders) {
-        if ([normalizeQuotes(listName(folder)) isEqualToString:normalizedName]) return folder;
+    for (id group in groups) {
+        if ([normalizeQuotes(listName(group)) isEqualToString:normalizedName]) return group;
     }
     return nil;
 }
 
-static NSArray *fetchChildLists(id folder) {
-    id sublistContext = ((id (*)(id, SEL))objc_msgSend)(folder, sel_registerName("sublistContext"));
+static NSArray *fetchChildLists(id group) {
+    id sublistContext = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("sublistContext"));
     NSError *error = nil;
     NSArray *lists = ((id (*)(id, SEL, id*))objc_msgSend)(
         sublistContext, sel_registerName("fetchListsWithError:"), &error);
-    if (error) errorExit([NSString stringWithFormat:@"Failed to fetch lists in folder: %@", error]);
+    if (error) errorExit([NSString stringWithFormat:@"Failed to fetch lists in group: %@", error]);
     return lists ?: @[];
 }
 
@@ -658,19 +658,19 @@ static NSMutableDictionary *listIdentityDict(id list) {
 
 static NSMutableDictionary *listToDict(id list) {
     NSMutableDictionary *d = listIdentityDict(list);
-    id folder = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
-    if (folder && listIsGroup(folder)) {
-        NSString *folderName = listName(folder);
-        id folderID = ((id (*)(id, SEL))objc_msgSend)(folder, sel_registerName("objectID"));
-        if (folderName) d[@"folder"] = folderName;
-        if (folderID) {
+    id group = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
+    if (group && listIsGroup(group)) {
+        NSString *groupName = listName(group);
+        id groupID = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("objectID"));
+        if (groupName) d[@"group"] = groupName;
+        if (groupID) {
             if (gOutputFull) {
-                d[@"folderID"] = objectIDToLegacyString(folderID) ?: @"";
+                d[@"groupID"] = objectIDToLegacyString(groupID) ?: @"";
             } else {
-                NSString *uuid = objectIDToUUID(folderID);
-                if (uuid) d[@"folderId"] = uuid;
-                NSString *uri = objectIDToURI(folderID);
-                if (uri) d[@"folderUri"] = uri;
+                NSString *uuid = objectIDToUUID(groupID);
+                if (uuid) d[@"groupId"] = uuid;
+                NSString *uri = objectIDToURI(groupID);
+                if (uri) d[@"groupUri"] = uri;
             }
         }
     }

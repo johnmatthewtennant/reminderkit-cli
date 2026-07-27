@@ -1,32 +1,29 @@
 // Handwritten commands — not produced by generate-cli.py
 
-// --- Folder Commands ---
-//
-// Apple Reminders calls these objects folders. ReminderKit models them as
-// REMList instances with isGroup=YES, hence the "group" aliases in main().
+// --- Group Commands ---
 
-static NSMutableDictionary *folderToDict(id folder) {
-    NSMutableDictionary *dict = listIdentityDict(folder);
+static NSMutableDictionary *groupToDict(id group) {
+    NSMutableDictionary *dict = listIdentityDict(group);
     NSMutableArray *children = [NSMutableArray array];
-    for (id list in fetchChildLists(folder)) {
+    for (id list in fetchChildLists(group)) {
         [children addObject:listToDict(list)];
     }
     dict[@"lists"] = children;
     return (NSMutableDictionary *)applyOutputShape(dict);
 }
 
-static int cmdFolders(id store) {
+static int cmdGroups(id store) {
     NSMutableArray *result = [NSMutableArray array];
-    for (id folder in fetchFolders(store)) {
-        [result addObject:folderToDict(folder)];
+    for (id group in fetchGroups(store)) {
+        [result addObject:groupToDict(group)];
     }
     printJSON(result);
     return 0;
 }
 
-static int cmdCreateFolder(id store, NSString *name) {
-    if (findFolder(store, name)) {
-        errorExit([NSString stringWithFormat:@"Folder already exists: %@", name]);
+static int cmdCreateGroup(id store, NSString *name) {
+    if (findGroup(store, name)) {
+        errorExit([NSString stringWithFormat:@"Group already exists: %@", name]);
     }
 
     NSArray *accounts = fetchAccounts(store);
@@ -39,39 +36,39 @@ static int cmdCreateFolder(id store, NSString *name) {
         saveReq, sel_registerName("updateAccount:"), account);
     id groupContext = ((id (*)(id, SEL))objc_msgSend)(
         accountCI, sel_registerName("groupContext"));
-    id newFolder = ((id (*)(id, SEL, id, id, id))objc_msgSend)(
+    id newGroup = ((id (*)(id, SEL, id, id, id))objc_msgSend)(
         saveReq, sel_registerName("addGroupWithName:toAccountGroupContextChangeItem:groupObjectID:"),
         name, groupContext, nil);
-    if (!newFolder) errorExit(@"Failed to create folder");
+    if (!newGroup) errorExit(@"Failed to create group");
 
     NSError *error = nil;
     ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
-    id created = findFolder(store, name);
-    if (!created) errorExit(@"Created folder but could not re-fetch it");
-    printJSON(folderToDict(created));
+    id created = findGroup(store, name);
+    if (!created) errorExit(@"Created group but could not re-fetch it");
+    printJSON(groupToDict(created));
     return 0;
 }
 
-static int cmdRenameFolder(id store, NSString *oldName, NSString *newName) {
-    id folder = findFolder(store, oldName);
-    if (!folder) errorExit([NSString stringWithFormat:@"Folder not found: %@", oldName]);
-    id collision = findFolder(store, newName);
+static int cmdRenameGroup(id store, NSString *oldName, NSString *newName) {
+    id group = findGroup(store, oldName);
+    if (!group) errorExit([NSString stringWithFormat:@"Group not found: %@", oldName]);
+    id collision = findGroup(store, newName);
     if (collision) {
-        id folderID = ((id (*)(id, SEL))objc_msgSend)(folder, sel_registerName("objectID"));
+        id groupID = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("objectID"));
         id collisionID = ((id (*)(id, SEL))objc_msgSend)(collision, sel_registerName("objectID"));
-        if (![objectIDToString(folderID) isEqualToString:objectIDToString(collisionID)]) {
-            errorExit([NSString stringWithFormat:@"Folder already exists: %@", newName]);
+        if (![objectIDToString(groupID) isEqualToString:objectIDToString(collisionID)]) {
+            errorExit([NSString stringWithFormat:@"Group already exists: %@", newName]);
         }
     }
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
-    id folderCI = ((id (*)(id, SEL, id))objc_msgSend)(
-        saveReq, sel_registerName("updateList:"), folder);
-    id storage = ((id (*)(id, SEL))objc_msgSend)(folderCI, sel_registerName("storage"));
+    id groupCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateList:"), group);
+    id storage = ((id (*)(id, SEL))objc_msgSend)(groupCI, sel_registerName("storage"));
     ((void (*)(id, SEL, id))objc_msgSend)(storage, sel_registerName("setName:"), newName);
 
     NSError *error = nil;
@@ -79,55 +76,132 @@ static int cmdRenameFolder(id store, NSString *oldName, NSString *newName) {
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
-    id renamed = findFolder(store, newName);
-    if (!renamed) errorExit(@"Renamed folder but could not re-fetch it");
-    printJSON(folderToDict(renamed));
+    id renamed = findGroup(store, newName);
+    if (!renamed) errorExit(@"Renamed group but could not re-fetch it");
+    printJSON(groupToDict(renamed));
     return 0;
 }
 
-static int cmdDeleteFolder(id store, NSString *name) {
-    id folder = findFolder(store, name);
-    if (!folder) errorExit([NSString stringWithFormat:@"Folder not found: %@", name]);
-    if (fetchChildLists(folder).count > 0) {
-        errorExit(@"Folder is not empty. Move its lists out before deleting it.");
+static int cmdDeleteGroup(id store, NSString *name, BOOL keepLists, BOOL deleteLists) {
+    id group = findGroup(store, name);
+    if (!group) errorExit([NSString stringWithFormat:@"Group not found: %@", name]);
+    NSArray *children = fetchChildLists(group);
+    if (children.count > 0 && !keepLists && !deleteLists) {
+        errorExit(@"Group is not empty. Pass --keep-lists or --delete-lists.");
     }
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
         [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
-    id folderCI = ((id (*)(id, SEL, id))objc_msgSend)(
-        saveReq, sel_registerName("updateList:"), folder);
-    ((void (*)(id, SEL))objc_msgSend)(folderCI, sel_registerName("removeFromParent"));
+    if (children.count > 0) {
+        id account = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("account"));
+        id accountCI = ((id (*)(id, SEL, id))objc_msgSend)(
+            saveReq, sel_registerName("updateAccount:"), account);
+        for (id child in children) {
+            id childCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                saveReq, sel_registerName("updateList:"), child);
+            if (keepLists) {
+                ((void (*)(id, SEL, id))objc_msgSend)(
+                    accountCI, sel_registerName("addListChangeItem:"), childCI);
+            } else {
+                ((void (*)(id, SEL))objc_msgSend)(
+                    childCI, sel_registerName("removeFromParent"));
+            }
+        }
+    }
+
+    id groupCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateList:"), group);
+    ((void (*)(id, SEL))objc_msgSend)(groupCI, sel_registerName("removeFromParent"));
 
     NSError *error = nil;
     ((BOOL (*)(id, SEL, id*))objc_msgSend)(
         saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
-    printJSON(@{@"name": name, @"deleted": @YES});
+    NSMutableDictionary *result = [@{@"name": name, @"deleted": @YES} mutableCopy];
+    if (children.count > 0) {
+        result[keepLists ? @"keptLists" : @"deletedLists"] = @([children count]);
+    }
+    printJSON(result);
     return 0;
 }
 
-static int cmdMoveList(id store, NSString *name, NSString *folderName) {
+static int cmdMoveGroup(id store, NSString *name, NSInteger position) {
+    id group = findGroup(store, name);
+    if (!group) errorExit([NSString stringWithFormat:@"Group not found: %@", name]);
+
+    id account = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("account"));
+    id accountID = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("objectID"));
+    id groupID = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("objectID"));
+    NSMutableArray *siblings = [NSMutableArray array];
+    for (id candidate in fetchGroups(store)) {
+        id candidateAccount = ((id (*)(id, SEL))objc_msgSend)(candidate, sel_registerName("account"));
+        id candidateAccountID = ((id (*)(id, SEL))objc_msgSend)(candidateAccount, sel_registerName("objectID"));
+        id candidateID = ((id (*)(id, SEL))objc_msgSend)(candidate, sel_registerName("objectID"));
+        if ([objectIDToString(candidateAccountID) isEqualToString:objectIDToString(accountID)]
+            && ![objectIDToString(candidateID) isEqualToString:objectIDToString(groupID)]) {
+            [siblings addObject:candidate];
+        }
+    }
+    if (position < 1 || position > (NSInteger)siblings.count + 1) {
+        errorExit([NSString stringWithFormat:@"Position must be between 1 and %lu",
+            (unsigned long)siblings.count + 1]);
+    }
+
+    id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
+        [REMSaveRequestClass alloc], sel_registerName("initWithStore:"), store);
+    id accountCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateAccount:"), account);
+    id groupCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateList:"), group);
+    if (siblings.count == 0) {
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            accountCI, sel_registerName("addListChangeItem:"), groupCI);
+    } else if (position == 1) {
+        id siblingCI = ((id (*)(id, SEL, id))objc_msgSend)(
+            saveReq, sel_registerName("updateList:"), siblings[0]);
+        ((void (*)(id, SEL, id, id))objc_msgSend)(
+            accountCI, sel_registerName("insertListChangeItem:beforeListChangeItem:"), groupCI, siblingCI);
+    } else {
+        id siblingCI = ((id (*)(id, SEL, id))objc_msgSend)(
+            saveReq, sel_registerName("updateList:"), siblings[position - 2]);
+        ((void (*)(id, SEL, id, id))objc_msgSend)(
+            accountCI, sel_registerName("insertListChangeItem:afterListChangeItem:"), groupCI, siblingCI);
+    }
+
+    NSError *error = nil;
+    ((BOOL (*)(id, SEL, id*))objc_msgSend)(
+        saveReq, sel_registerName("saveSynchronouslyWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
+
+    id moved = findGroup(store, name);
+    NSMutableDictionary *result = groupToDict(moved);
+    addFieldIfRequested(result, @"position", @(position));
+    printJSON(result);
+    return 0;
+}
+
+static int cmdMoveList(id store, NSString *name, NSString *groupName, NSInteger position) {
     id list = findList(store, name);
     if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", name]);
-    if (listIsGroup(list)) errorExit(@"A folder cannot be moved as a reminder list");
+    if (listIsGroup(list)) errorExit(@"A group cannot be moved as a reminder list");
 
-    id folder = folderName ? findFolder(store, folderName) : nil;
-    if (folderName && !folder) {
-        errorExit([NSString stringWithFormat:@"Folder not found: %@", folderName]);
+    id group = groupName ? findGroup(store, groupName) : nil;
+    if (groupName && !group) {
+        errorExit([NSString stringWithFormat:@"Group not found: %@", groupName]);
     }
 
     id account = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("account"));
-    if (folder) {
-        id folderAccount = ((id (*)(id, SEL))objc_msgSend)(folder, sel_registerName("account"));
+    if (group) {
+        id groupAccount = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("account"));
         id accountID = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("objectID"));
-        id folderAccountID = ((id (*)(id, SEL))objc_msgSend)(folderAccount, sel_registerName("objectID"));
-        if (![objectIDToString(accountID) isEqualToString:objectIDToString(folderAccountID)]) {
-            errorExit(@"List and folder are in different accounts");
+        id groupAccountID = ((id (*)(id, SEL))objc_msgSend)(groupAccount, sel_registerName("objectID"));
+        if (![objectIDToString(accountID) isEqualToString:objectIDToString(groupAccountID)]) {
+            errorExit(@"List and group are in different accounts");
         }
         BOOL canInclude = ((BOOL (*)(id, SEL))objc_msgSend)(
             list, sel_registerName("canBeIncludedInGroup"));
-        if (!canInclude) errorExit(@"This list cannot be placed in a folder");
+        if (!canInclude) errorExit(@"This list cannot be placed in a group");
     }
 
     id saveReq = ((id (*)(id, SEL, id))objc_msgSend)(
@@ -137,13 +211,47 @@ static int cmdMoveList(id store, NSString *name, NSString *folderName) {
     id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
         saveReq, sel_registerName("updateList:"), list);
 
-    if (folder) {
-        id folderCI = ((id (*)(id, SEL, id))objc_msgSend)(
-            saveReq, sel_registerName("updateList:"), folder);
+    if (group) {
+        id groupCI = ((id (*)(id, SEL, id))objc_msgSend)(
+            saveReq, sel_registerName("updateList:"), group);
         id sublistContext = ((id (*)(id, SEL))objc_msgSend)(
-            folderCI, sel_registerName("sublistContext"));
-        ((void (*)(id, SEL, id))objc_msgSend)(
-            sublistContext, sel_registerName("addListChangeItem:"), listCI);
+            groupCI, sel_registerName("sublistContext"));
+        NSMutableArray *siblings = [NSMutableArray array];
+        id listID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
+        for (id candidate in fetchChildLists(group)) {
+            id candidateID = ((id (*)(id, SEL))objc_msgSend)(candidate, sel_registerName("objectID"));
+            if (![objectIDToString(candidateID) isEqualToString:objectIDToString(listID)]) {
+                [siblings addObject:candidate];
+            }
+        }
+        if (position > 0 && position > (NSInteger)siblings.count + 1) {
+            errorExit([NSString stringWithFormat:@"Position must be between 1 and %lu",
+                (unsigned long)siblings.count + 1]);
+        }
+        if (position == 1 && siblings.count > 0) {
+            id siblingCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                saveReq, sel_registerName("updateList:"), siblings[0]);
+            ((void (*)(id, SEL, id, id))objc_msgSend)(
+                sublistContext, sel_registerName("insertListChangeItem:beforeListChangeItem:"),
+                listCI, siblingCI);
+        } else if (position > 1 && position <= (NSInteger)siblings.count) {
+            id siblingCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                saveReq, sel_registerName("updateList:"), siblings[position - 2]);
+            ((void (*)(id, SEL, id, id))objc_msgSend)(
+                sublistContext, sel_registerName("insertListChangeItem:afterListChangeItem:"),
+                listCI, siblingCI);
+        } else {
+            if (siblings.count > 0) {
+                id siblingCI = ((id (*)(id, SEL, id))objc_msgSend)(
+                    saveReq, sel_registerName("updateList:"), [siblings lastObject]);
+                ((void (*)(id, SEL, id, id))objc_msgSend)(
+                    sublistContext, sel_registerName("insertListChangeItem:afterListChangeItem:"),
+                    listCI, siblingCI);
+            } else {
+                ((void (*)(id, SEL, id))objc_msgSend)(
+                    sublistContext, sel_registerName("addListChangeItem:"), listCI);
+            }
+        }
     } else {
         ((void (*)(id, SEL, id))objc_msgSend)(
             accountCI, sel_registerName("addListChangeItem:"), listCI);
@@ -155,14 +263,16 @@ static int cmdMoveList(id store, NSString *name, NSString *folderName) {
     if (error) errorExit([NSString stringWithFormat:@"Save failed: %@", error]);
 
     id moved = findList(store, name);
-    id actualFolder = ((id (*)(id, SEL))objc_msgSend)(moved, sel_registerName("parentList"));
-    NSString *actualFolderName = actualFolder && listIsGroup(actualFolder) ? listName(actualFolder) : nil;
-    BOOL verified = folderName
-        ? [actualFolderName isEqualToString:folderName]
-        : (actualFolderName == nil);
-    if (!verified) errorExit(@"Save completed but the list's folder did not change");
+    id actualGroup = ((id (*)(id, SEL))objc_msgSend)(moved, sel_registerName("parentList"));
+    NSString *actualGroupName = actualGroup && listIsGroup(actualGroup) ? listName(actualGroup) : nil;
+    BOOL verified = groupName
+        ? [actualGroupName isEqualToString:groupName]
+        : (actualGroupName == nil);
+    if (!verified) errorExit(@"Save completed but the list's group did not change");
 
-    printJSON(listToDict(moved));
+    NSMutableDictionary *result = listToDict(moved);
+    if (position > 0) addFieldIfRequested(result, @"position", @(position));
+    printJSON(result);
     return 0;
 }
 
