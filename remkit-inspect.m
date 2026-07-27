@@ -28,6 +28,7 @@ static void dumpMethods(Class cls) {
 int main() {
     @autoreleasepool {
         [[NSBundle bundleWithPath:@"/System/Library/PrivateFrameworks/ReminderKit.framework"] load];
+        [[NSBundle bundleWithPath:@"/System/Library/PrivateFrameworks/RemindersUICore.framework"] load];
 
         NSArray *classNames = @[
             @"REMReminder", @"REMList", @"REMStore", @"REMAccount",
@@ -36,7 +37,8 @@ int main() {
             @"REMListSection", @"REMReminderSubtaskContextChangeItem",
             @"REMAccountChangeItem", @"REMAccountGroupContext",
             @"REMAccountGroupContextChangeItem", @"REMListSublistContext",
-            @"REMListSublistContextChangeItem"
+            @"REMListSublistContextChangeItem", @"REMListStorage",
+            @"REMListAppearanceContext", @"REMListAppearanceContextChangeItem"
         ];
 
         for (NSString *name in classNames) {
@@ -70,7 +72,9 @@ int main() {
         NSArray *additionalMethodClasses = @[
             @"REMStore", @"REMAccount", @"REMAccountChangeItem",
             @"REMAccountGroupContext", @"REMAccountGroupContextChangeItem",
-            @"REMListSublistContext", @"REMListSublistContextChangeItem"
+            @"REMListSublistContext", @"REMListSublistContextChangeItem",
+            @"REMListStorage", @"REMListAppearanceContext",
+            @"REMListAppearanceContextChangeItem"
         ];
         for (NSString *name in additionalMethodClasses) {
             fprintf(stderr, "\n\n--- %s METHODS ---\n", [name UTF8String]);
@@ -78,6 +82,23 @@ int main() {
             if (cls) dumpMethods(cls);
             else fprintf(stderr, "  NOT FOUND\n");
         }
+
+        fprintf(stderr, "\n\n--- VIEW/COLUMN/LAYOUT CLASSES ---\n");
+        int classCount = objc_getClassList(NULL, 0);
+        Class *classes = classCount > 0 ? malloc(sizeof(Class) * classCount) : NULL;
+        classCount = classes ? objc_getClassList(classes, classCount) : 0;
+        for (int i = 0; i < classCount; i++) {
+            NSString *name = [NSString stringWithUTF8String:class_getName(classes[i])];
+            NSString *lower = [name lowercaseString];
+            if ([lower containsString:@"rem"]
+                && ([lower containsString:@"column"]
+                    || [lower containsString:@"layout"]
+                    || [lower containsString:@"viewmode"]
+                    || [lower containsString:@"sortingstyle"])) {
+                fprintf(stderr, "  %s\n", [name UTF8String]);
+            }
+        }
+        free(classes);
 
         // Read-only discovery of the group/list hierarchy.
         fprintf(stderr, "\n\n--- LIVE GROUP/LIST HIERARCHY ---\n");

@@ -1,6 +1,6 @@
 ---
 name: apple-reminders
-description: Interact with Apple Reminders on macOS — create, read, update, complete, delete reminders, and manage groups, lists, sections, subtasks, and tags. Use when creating, adding, listing, getting, updating, completing, deleting, searching, or managing reminders, reminder groups, reminder lists, subtasks, sections, or tags in Apple Reminders.
+description: Interact with Apple Reminders on macOS — create, read, update, complete, delete reminders, and manage groups, lists, list views, sections, subtasks, and tags. Use when creating, adding, listing, getting, updating, completing, deleting, searching, or managing reminders, reminder groups, reminder lists, List or Columns views, subtasks, sections, or tags in Apple Reminders.
 allowed-tools:
   - Bash(reminderkit *)
 ---
@@ -30,6 +30,19 @@ ordered `lists` array. `reminderkit lists` adds `group`, `groupId`, and
 `groupUri` when a list belongs to a group. Positions are one-based. Moving a
 list between accounts is not supported. Deleting with `--delete-lists` also
 deletes reminders in those lists and must only be used when explicitly wanted.
+
+## List View
+
+Set a reminder list to Apple Reminders' List or Columns view:
+
+```bash
+reminderkit set-list-view --name <list-name> --view list
+reminderkit set-list-view --name <list-name> --view columns
+```
+
+`reminderkit lists --fields name,view` reads the effective view. The default
+is `list`; without `--fields` or `--full`, that default is omitted from JSON,
+while the non-default `columns` value is included.
 
 ## `reminderkit --help` (auto-executed)
 

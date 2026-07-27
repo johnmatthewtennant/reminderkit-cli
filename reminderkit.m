@@ -41,6 +41,7 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit create-list --name <name>\n");
     fprintf(stderr, "  reminderkit rename-list --old-name <old-name> --new-name <new-name>\n");
     fprintf(stderr, "  reminderkit delete-list --name <name>\n");
+    fprintf(stderr, "  reminderkit set-list-view --name <list-name> --view <list|columns>\n");
     fprintf(stderr, "  reminderkit groups\n");
     fprintf(stderr, "  reminderkit create-group --name <name>\n");
     fprintf(stderr, "  reminderkit rename-group --old-name <old-name> --new-name <new-name>\n");
@@ -132,6 +133,7 @@ int main(int argc, const char *argv[]) {
             @"complete", @"delete", @"batch", @"add-tag", @"remove-tag", @"assign",
             @"unassign", @"list-sharees", @"link-note", @"list-sections",
             @"create-section", @"delete-section", @"create-list", @"rename-list", @"delete-list",
+            @"set-list-view",
             @"groups", @"create-group", @"rename-group", @"delete-group", @"move-group", @"move-list",
             @"install-skill", @"version", @"test", nil];
         if (![knownCommands containsObject:command]) {
@@ -319,6 +321,12 @@ int main(int argc, const char *argv[]) {
         } else if ([command isEqualToString:@"delete-list"]) {
             if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
             return cmdDeleteList(store, kwName);
+
+        } else if ([command isEqualToString:@"set-list-view"]) {
+            if (!kwName || !opts[@"view"]) {
+                fprintf(stderr, "Error: --name and --view required\n"); usage(); return 1;
+            }
+            return cmdSetListView(store, kwName, [opts[@"view"] lowercaseString]);
 
         } else if ([command isEqualToString:@"groups"]) {
             return cmdGroups(store);
