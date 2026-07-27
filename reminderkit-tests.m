@@ -1866,6 +1866,75 @@ static int cmdTest(id store) {
         }
     }
 
+    // Folder/group lifecycle and list membership. These objects are temporary
+    // and are always moved back to the account root before deletion.
+    fprintf(stderr, "Test: folder lifecycle and list membership...\n");
+    {
+        NSString *folderName = @"__remcli_test_folder__";
+        NSString *renamedFolderName = @"__remcli_test_folder_renamed__";
+        NSString *folderListName = @"__remcli_test_folder_list__";
+
+        // Clean up leftovers from an interrupted prior run.
+        id leftoverList = findList(store, folderListName);
+        if (leftoverList) {
+            id parent = ((id (*)(id, SEL))objc_msgSend)(leftoverList, sel_registerName("parentList"));
+            if (parent && listIsGroup(parent)) cmdMoveList(store, folderListName, nil);
+            cmdDeleteList(store, folderListName);
+        }
+        for (NSString *leftoverName in @[folderName, renamedFolderName]) {
+            id leftoverFolder = findFolder(store, leftoverName);
+            if (leftoverFolder && fetchChildLists(leftoverFolder).count == 0) {
+                cmdDeleteFolder(store, leftoverName);
+            }
+        }
+
+        int rCreateFolder = cmdCreateFolder(store, folderName);
+        int rCreateList = cmdCreateList(store, folderListName);
+        int rMoveIn = cmdMoveList(store, folderListName, folderName);
+        id groupedList = findList(store, folderListName);
+        id groupedParent = groupedList
+            ? ((id (*)(id, SEL))objc_msgSend)(groupedList, sel_registerName("parentList"))
+            : nil;
+        BOOL movedIn = groupedParent && [listName(groupedParent) isEqualToString:folderName];
+
+        __block int rFolders = -1;
+        NSData *foldersOut = captureStdout(^{ rFolders = cmdFolders(store); });
+        NSArray *foldersJSON = parseJSONFromData(foldersOut);
+        NSDictionary *folderJSON = [foldersJSON isKindOfClass:[NSArray class]]
+            ? jsonArrayFind(foldersJSON, @"name", folderName)
+            : nil;
+        BOOL folderJSONValid = folderJSON[@"id"] && folderJSON[@"uri"]
+            && [folderJSON[@"lists"] isKindOfClass:[NSArray class]]
+            && jsonArrayFind(folderJSON[@"lists"], @"name", folderListName);
+
+        int rRename = cmdRenameFolder(store, folderName, renamedFolderName);
+        id renamedFolder = findFolder(store, renamedFolderName);
+        int rMoveOut = cmdMoveList(store, folderListName, nil);
+        id ungroupedList = findList(store, folderListName);
+        id ungroupedParent = ungroupedList
+            ? ((id (*)(id, SEL))objc_msgSend)(ungroupedList, sel_registerName("parentList"))
+            : nil;
+        BOOL movedOut = !(ungroupedParent && listIsGroup(ungroupedParent));
+
+        int rDeleteFolder = cmdDeleteFolder(store, renamedFolderName);
+        int rDeleteList = cmdDeleteList(store, folderListName);
+        BOOL cleaned = !findFolder(store, renamedFolderName) && !findList(store, folderListName);
+
+        BOOL ok = rCreateFolder == 0 && rCreateList == 0 && rMoveIn == 0
+            && movedIn && rFolders == 0 && folderJSONValid
+            && rRename == 0 && renamedFolder
+            && rMoveOut == 0 && movedOut
+            && rDeleteFolder == 0 && rDeleteList == 0 && cleaned;
+        if (ok) { fprintf(stderr, "  PASS\n"); passed++; }
+        else {
+            fprintf(stderr, "  FAIL (createFolder=%d createList=%d moveIn=%d movedIn=%d folders=%d json=%d rename=%d renamed=%d moveOut=%d movedOut=%d deleteFolder=%d deleteList=%d cleaned=%d)\n",
+                rCreateFolder, rCreateList, rMoveIn, movedIn, rFolders, folderJSONValid,
+                rRename, renamedFolder != nil, rMoveOut, movedOut,
+                rDeleteFolder, rDeleteList, cleaned);
+            failed++;
+        }
+    }
+
     // Cleanup
     // Test 47: cmdDelete child
     fprintf(stderr, "Test 47: cmdDelete child...\n");
@@ -1895,5 +1964,4 @@ static int cmdTest(id store) {
     fprintf(stderr, "\nResults: %d passed, %d failed\n", passed, failed);
     return failed > 0 ? 1 : 0;
 }
-
 

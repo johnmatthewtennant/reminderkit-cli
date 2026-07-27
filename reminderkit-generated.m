@@ -449,6 +449,16 @@ static void printJSON(id obj) {
 
 // --- List Helpers ---
 
+static NSString *listName(id list) {
+    if (!list) return nil;
+    id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
+    return ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
+}
+
+static BOOL listIsGroup(id list) {
+    return list && ((BOOL (*)(id, SEL))objc_msgSend)(list, sel_registerName("isGroup"));
+}
+
 static NSArray *fetchLists(id store) {
     NSError *error = nil;
     NSArray *lists = ((id (*)(id, SEL, id*))objc_msgSend)(
@@ -469,19 +479,101 @@ static NSArray *fetchLists(id store) {
     return lists;
 }
 
+static NSArray *fetchAccounts(id store) {
+    NSError *error = nil;
+    NSArray *accounts = ((id (*)(id, SEL, id*))objc_msgSend)(
+        store, sel_registerName("fetchAccountsWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Failed to fetch accounts: %@", error]);
+    return accounts ?: @[];
+}
+
+static NSArray *fetchFolders(id store) {
+    NSMutableArray *folders = [NSMutableArray array];
+    for (id account in fetchAccounts(store)) {
+        id groupContext = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("groupContext"));
+        NSError *error = nil;
+        NSArray *accountFolders = ((id (*)(id, SEL, id*))objc_msgSend)(
+            groupContext, sel_registerName("fetchGroupsWithError:"), &error);
+        if (error) errorExit([NSString stringWithFormat:@"Failed to fetch folders: %@", error]);
+        if (accountFolders) [folders addObjectsFromArray:accountFolders];
+    }
+    return folders;
+}
+
+static id findFolder(id store, NSString *name) {
+    NSArray *folders = fetchFolders(store);
+    for (id folder in folders) {
+        NSString *candidateName = listName(folder);
+        if ([candidateName isEqualToString:name]) return folder;
+    }
+    NSString *normalizedName = normalizeQuotes(name);
+    for (id folder in folders) {
+        if ([normalizeQuotes(listName(folder)) isEqualToString:normalizedName]) return folder;
+    }
+    return nil;
+}
+
+static NSArray *fetchChildLists(id folder) {
+    id sublistContext = ((id (*)(id, SEL))objc_msgSend)(folder, sel_registerName("sublistContext"));
+    NSError *error = nil;
+    NSArray *lists = ((id (*)(id, SEL, id*))objc_msgSend)(
+        sublistContext, sel_registerName("fetchListsWithError:"), &error);
+    if (error) errorExit([NSString stringWithFormat:@"Failed to fetch lists in folder: %@", error]);
+    return lists ?: @[];
+}
+
+static NSMutableDictionary *listIdentityDict(id list) {
+    NSMutableDictionary *d = [NSMutableDictionary dictionary];
+    NSString *name = listName(list);
+    id objID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
+    if (name) d[@"name"] = name;
+    if (objID) {
+        if (gOutputFull) {
+            d[@"id"] = objectIDToLegacyString(objID) ?: @"";
+            NSString *uuid = objectIDToUUID(objID);
+            if (uuid) d[@"uuid"] = uuid;
+        } else {
+            NSString *uuid = objectIDToUUID(objID);
+            d[@"id"] = uuid ?: (objectIDToString(objID) ?: @"");
+            NSString *uri = objectIDToURI(objID);
+            if (uri) d[@"uri"] = uri;
+        }
+    }
+    return d;
+}
+
+static NSMutableDictionary *listToDict(id list) {
+    NSMutableDictionary *d = listIdentityDict(list);
+    id folder = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
+    if (folder && listIsGroup(folder)) {
+        NSString *folderName = listName(folder);
+        id folderID = ((id (*)(id, SEL))objc_msgSend)(folder, sel_registerName("objectID"));
+        if (folderName) d[@"folder"] = folderName;
+        if (folderID) {
+            if (gOutputFull) {
+                d[@"folderID"] = objectIDToLegacyString(folderID) ?: @"";
+            } else {
+                NSString *uuid = objectIDToUUID(folderID);
+                if (uuid) d[@"folderId"] = uuid;
+                NSString *uri = objectIDToURI(folderID);
+                if (uri) d[@"folderUri"] = uri;
+            }
+        }
+    }
+    return (NSMutableDictionary *)applyOutputShape(d);
+}
+
 static id findList(id store, NSString *name) {
     NSArray *lists = fetchLists(store);
     for (id list in lists) {
-        id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
-        NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
-        if ([listName isEqualToString:name]) return list;
+        NSString *candidateName = listName(list);
+        if ([candidateName isEqualToString:name]) return list;
     }
     // Normalized fallback: retry with curly quotes normalized to straight quotes
     NSString *normalizedName = normalizeQuotes(name);
     for (id list in lists) {
-        id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
-        NSString *listName = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
-        if ([normalizeQuotes(listName) isEqualToString:normalizedName]) return list;
+        NSString *candidateName = listName(list);
+        if ([normalizeQuotes(candidateName) isEqualToString:normalizedName]) return list;
     }
     return nil;
 }
@@ -864,25 +956,7 @@ static int cmdLists(id store) {
     NSArray *lists = fetchLists(store);
     NSMutableArray *result = [NSMutableArray array];
     for (id list in lists) {
-        id storage = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("storage"));
-        NSString *name = ((id (*)(id, SEL))objc_msgSend)(storage, sel_registerName("name"));
-        id objID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
-        NSMutableDictionary *d = [NSMutableDictionary dictionary];
-        if (name) d[@"name"] = name;
-        if (objID) {
-            if (gOutputFull) {
-                // Exact legacy bytes for byte-compat, plus "uuid" as a new addition.
-                d[@"id"] = objectIDToLegacyString(objID) ?: @"";
-                NSString *uuid = objectIDToUUID(objID);
-                if (uuid) d[@"uuid"] = uuid;
-            } else {
-                NSString *uuid = objectIDToUUID(objID);
-                d[@"id"] = uuid ?: (objectIDToString(objID) ?: @"");
-                NSString *uri = objectIDToURI(objID);
-                if (uri) d[@"uri"] = uri;
-            }
-        }
-        [result addObject:(NSDictionary *)applyOutputShape(d)];
+        [result addObject:listToDict(list)];
     }
     printJSON(result);
     return 0;

@@ -30,10 +30,13 @@ int main() {
         [[NSBundle bundleWithPath:@"/System/Library/PrivateFrameworks/ReminderKit.framework"] load];
 
         NSArray *classNames = @[
-            @"REMReminder", @"REMList", @"REMStore",
+            @"REMReminder", @"REMList", @"REMStore", @"REMAccount",
             @"REMSaveRequest", @"REMReminderChangeItem",
             @"REMHashtag", @"REMHashtagLabel",
-            @"REMListSection", @"REMReminderSubtaskContextChangeItem"
+            @"REMListSection", @"REMReminderSubtaskContextChangeItem",
+            @"REMAccountChangeItem", @"REMAccountGroupContext",
+            @"REMAccountGroupContextChangeItem", @"REMListSublistContext",
+            @"REMListSublistContextChangeItem"
         ];
 
         for (NSString *name in classNames) {
@@ -64,12 +67,58 @@ int main() {
             dumpMethods(listCIClass);
         }
 
-        // Quick test: init store and fetch one reminder to inspect actual values
-        fprintf(stderr, "\n\n--- LIVE REMINDER INSPECTION ---\n");
+        NSArray *additionalMethodClasses = @[
+            @"REMStore", @"REMAccount", @"REMAccountChangeItem",
+            @"REMAccountGroupContext", @"REMAccountGroupContextChangeItem",
+            @"REMListSublistContext", @"REMListSublistContextChangeItem"
+        ];
+        for (NSString *name in additionalMethodClasses) {
+            fprintf(stderr, "\n\n--- %s METHODS ---\n", [name UTF8String]);
+            Class cls = NSClassFromString(name);
+            if (cls) dumpMethods(cls);
+            else fprintf(stderr, "  NOT FOUND\n");
+        }
+
+        // Read-only discovery of the group/list hierarchy.
+        fprintf(stderr, "\n\n--- LIVE GROUP/LIST HIERARCHY ---\n");
         Class REMStore = NSClassFromString(@"REMStore");
         id store = ((id (*)(id, SEL, BOOL))objc_msgSend)(
             [REMStore alloc], sel_registerName("initUserInteractive:"), YES);
+        NSError *hierarchyError = nil;
+        NSArray *accounts = ((id (*)(id, SEL, id*))objc_msgSend)(
+            store, sel_registerName("fetchAccountsWithError:"), &hierarchyError);
+        if (hierarchyError) {
+            fprintf(stderr, "Account fetch failed: %s\n", [[hierarchyError description] UTF8String]);
+        }
+        for (id account in accounts ?: @[]) {
+            NSString *accountName = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("name"));
+            fprintf(stderr, "Account: %s\n", [accountName UTF8String] ?: "(unnamed)");
+            id groupContext = ((id (*)(id, SEL))objc_msgSend)(account, sel_registerName("groupContext"));
+            NSError *groupError = nil;
+            NSArray *groups = ((id (*)(id, SEL, id*))objc_msgSend)(
+                groupContext, sel_registerName("fetchGroupsWithError:"), &groupError);
+            if (groupError) {
+                fprintf(stderr, "  Group fetch failed: %s\n", [[groupError description] UTF8String]);
+            }
+            for (id group in groups ?: @[]) {
+                NSString *groupName = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("name"));
+                fprintf(stderr, "  Group: %s\n", [groupName UTF8String] ?: "(unnamed)");
+                id sublistContext = ((id (*)(id, SEL))objc_msgSend)(group, sel_registerName("sublistContext"));
+                NSError *listError = nil;
+                NSArray *childLists = ((id (*)(id, SEL, id*))objc_msgSend)(
+                    sublistContext, sel_registerName("fetchListsWithError:"), &listError);
+                if (listError) {
+                    fprintf(stderr, "    List fetch failed: %s\n", [[listError description] UTF8String]);
+                }
+                for (id child in childLists ?: @[]) {
+                    NSString *childName = ((id (*)(id, SEL))objc_msgSend)(child, sel_registerName("name"));
+                    fprintf(stderr, "    List: %s\n", [childName UTF8String] ?: "(unnamed)");
+                }
+            }
+        }
 
+        // Quick test: init store and fetch one reminder to inspect actual values
+        fprintf(stderr, "\n\n--- LIVE REMINDER INSPECTION ---\n");
         NSError *error = nil;
         NSArray *lists = ((id (*)(id, SEL, id*))objc_msgSend)(
             store, sel_registerName("fetchEligibleDefaultListsWithError:"), &error);

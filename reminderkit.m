@@ -41,6 +41,12 @@ static void usage(void) {
     fprintf(stderr, "  reminderkit create-list --name <name>\n");
     fprintf(stderr, "  reminderkit rename-list --old-name <old-name> --new-name <new-name>\n");
     fprintf(stderr, "  reminderkit delete-list --name <name>\n");
+    fprintf(stderr, "  reminderkit folders  (aliases: groups, list-groups)\n");
+    fprintf(stderr, "  reminderkit create-folder --name <name>  (alias: create-group)\n");
+    fprintf(stderr, "  reminderkit rename-folder --old-name <old-name> --new-name <new-name>  (alias: rename-group)\n");
+    fprintf(stderr, "  reminderkit delete-folder --name <name>  (alias: delete-group; folder must be empty)\n");
+    fprintf(stderr, "  reminderkit move-list --name <list-name> --folder <folder-name>\n");
+    fprintf(stderr, "  reminderkit move-list --name <list-name> --remove-from-folder\n");
     fprintf(stderr, "  reminderkit batch  (reads JSON array from stdin)\n");
     fprintf(stderr, "    ops: add, update, complete, delete, add-tag, remove-tag\n");
     fprintf(stderr, "\n  Output shaping (applies to any command that returns JSON):\n");
@@ -80,6 +86,7 @@ int main(int argc, const char *argv[]) {
                 if ([flag isEqualToString:@"include-completed"] ||
                     [flag isEqualToString:@"remove-parent"] ||
                     [flag isEqualToString:@"remove-from-list"] ||
+                    [flag isEqualToString:@"remove-from-folder"] ||
                     [flag isEqualToString:@"help"] ||
                     [flag isEqualToString:@"clear-url"] ||
                     [flag isEqualToString:@"has-url"] ||
@@ -122,6 +129,8 @@ int main(int argc, const char *argv[]) {
             @"complete", @"delete", @"batch", @"add-tag", @"remove-tag", @"assign",
             @"unassign", @"list-sharees", @"link-note", @"list-sections",
             @"create-section", @"delete-section", @"create-list", @"rename-list", @"delete-list",
+            @"folders", @"groups", @"list-groups", @"create-folder", @"create-group",
+            @"rename-folder", @"rename-group", @"delete-folder", @"delete-group", @"move-list",
             @"install-skill", @"version", @"test", nil];
         if (![knownCommands containsObject:command]) {
             fprintf(stderr, "Unknown command: %s\n", [command UTF8String]);
@@ -308,6 +317,35 @@ int main(int argc, const char *argv[]) {
         } else if ([command isEqualToString:@"delete-list"]) {
             if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
             return cmdDeleteList(store, kwName);
+
+        } else if ([command isEqualToString:@"folders"] ||
+                   [command isEqualToString:@"groups"] ||
+                   [command isEqualToString:@"list-groups"]) {
+            return cmdFolders(store);
+
+        } else if ([command isEqualToString:@"create-folder"] ||
+                   [command isEqualToString:@"create-group"]) {
+            if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
+            return cmdCreateFolder(store, kwName);
+
+        } else if ([command isEqualToString:@"rename-folder"] ||
+                   [command isEqualToString:@"rename-group"]) {
+            if (!kwOldName || !kwNewName) { fprintf(stderr, "Error: --old-name and --new-name required\n"); usage(); return 1; }
+            return cmdRenameFolder(store, kwOldName, kwNewName);
+
+        } else if ([command isEqualToString:@"delete-folder"] ||
+                   [command isEqualToString:@"delete-group"]) {
+            if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
+            return cmdDeleteFolder(store, kwName);
+
+        } else if ([command isEqualToString:@"move-list"]) {
+            NSString *folderName = opts[@"folder"] ?: opts[@"group"];
+            BOOL removeFromFolder = [opts[@"remove-from-folder"] isEqualToString:@"true"];
+            if (!kwName) { fprintf(stderr, "Error: --name required\n"); usage(); return 1; }
+            if ((!folderName && !removeFromFolder) || (folderName && removeFromFolder)) {
+                fprintf(stderr, "Error: exactly one of --folder or --remove-from-folder required\n"); usage(); return 1;
+            }
+            return cmdMoveList(store, kwName, removeFromFolder ? nil : folderName);
 
         } else if ([command isEqualToString:@"version"]) {
             return cmdVersion([opts[@"skip-check"] isEqualToString:@"true"]);
