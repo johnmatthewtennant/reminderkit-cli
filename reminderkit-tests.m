@@ -1749,6 +1749,77 @@ static int cmdTest(id store) {
         }
     }
 
+    // Test: cmdUpdate --to-list + --section assigns the destination section
+    fprintf(stderr, "Test: cmdUpdate --to-list + --section...\n");
+    {
+        NSString *destListName = @"__remcli_test_section_move_dest__";
+        NSString *sectionName = @"__remcli_test_section_move_shared__";
+        NSString *destOnlySectionName = @"__remcli_test_section_move_dest_only__";
+        NSString *moveTitle = @"__remcli_test_section_move__";
+        NSString *destOnlyMoveTitle = @"__remcli_test_section_move_dest_only__";
+
+        int rd = cmdCreateList(store, destListName);
+        int rss = cmdCreateSection(store, testListName, sectionName);
+        int rsd = cmdCreateSection(store, destListName, sectionName);
+        int rsdo = cmdCreateSection(store, destListName, destOnlySectionName);
+        int ra = cmdAdd(store, moveTitle, testListName, @{});
+        if (rd != 0 || rss != 0 || rsd != 0 || rsdo != 0 || ra != 0) {
+            fprintf(stderr, "  FAIL (could not create move fixtures)\n"); failed++;
+        } else {
+            id moveRem = findReminder(store, moveTitle, testListName);
+            NSString *moveID = objectIDToUUID(
+                ((id (*)(id, SEL))objc_msgSend)(moveRem, sel_registerName("objectID")));
+            __block int ru = -1;
+            captureStdout(^{
+                ru = cmdUpdate(store, nil, @{
+                    @"id": moveID,
+                    @"to-list": destListName,
+                    @"section": sectionName
+                });
+            });
+            id movedRem = findReminderByID(store, moveID);
+            NSDictionary *moved = movedRem ? reminderToDict(movedRem) : nil;
+            if (ru == 0 && [moved[@"section"] isEqualToString:sectionName]) {
+                fprintf(stderr, "  PASS\n"); passed++;
+            } else {
+                fprintf(stderr, "  FAIL (section=%s update=%d)\n",
+                    [moved[@"section"] UTF8String] ?: "nil", ru); failed++;
+            }
+            if (movedRem) cmdDelete(store, moveID);
+
+            fprintf(stderr, "Test: cmdUpdate --to-list + destination-only --section...\n");
+            int rado = cmdAdd(store, destOnlyMoveTitle, testListName, @{});
+            if (rado != 0) {
+                fprintf(stderr, "  FAIL (could not create destination-only move fixture)\n"); failed++;
+            } else {
+                id destOnlyMoveRem = findReminder(store, destOnlyMoveTitle, testListName);
+                NSString *destOnlyMoveID = objectIDToUUID(
+                    ((id (*)(id, SEL))objc_msgSend)(destOnlyMoveRem, sel_registerName("objectID")));
+                __block int rudo = -1;
+                captureStdout(^{
+                    rudo = cmdUpdate(store, nil, @{
+                        @"id": destOnlyMoveID,
+                        @"to-list": destListName,
+                        @"section": destOnlySectionName
+                    });
+                });
+                id destOnlyMovedRem = findReminderByID(store, destOnlyMoveID);
+                NSDictionary *destOnlyMoved = destOnlyMovedRem ? reminderToDict(destOnlyMovedRem) : nil;
+                if (rudo == 0 && [destOnlyMoved[@"section"] isEqualToString:destOnlySectionName]) {
+                    fprintf(stderr, "  PASS\n"); passed++;
+                } else {
+                    fprintf(stderr, "  FAIL (section=%s update=%d)\n",
+                        [destOnlyMoved[@"section"] UTF8String] ?: "nil", rudo); failed++;
+                }
+                if (destOnlyMovedRem) cmdDelete(store, destOnlyMoveID);
+            }
+        }
+        if (findSection(store, findList(store, testListName), sectionName)) {
+            cmdDeleteSection(store, testListName, sectionName);
+        }
+        if (findList(store, destListName)) cmdDeleteList(store, destListName);
+    }
+
     // Test: batch update to-list moves reminder between lists
     fprintf(stderr, "Test: batch update to-list...\n");
     {
