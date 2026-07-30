@@ -1,6 +1,6 @@
 ---
 name: apple-reminders
-description: Interact with Apple Reminders on macOS — create, read, update, complete, delete reminders, and manage groups, lists, list views, sections, subtasks, and tags. Use when creating, adding, listing, getting, updating, completing, deleting, searching, or managing reminders, reminder groups, reminder lists, List or Columns views, subtasks, sections, or tags in Apple Reminders.
+description: Interact with Apple Reminders on macOS — create, read, update, complete, delete reminders, and manage groups, lists, sections, subtasks, and tags. Use when creating, adding, listing, getting, updating, completing, deleting, searching, or managing reminders, reminder groups, reminder lists, subtasks, sections, or tags in Apple Reminders.
 allowed-tools:
   - Bash(reminderkit *)
 ---

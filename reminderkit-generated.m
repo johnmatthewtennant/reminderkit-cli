@@ -229,7 +229,7 @@ static void addFieldIfRequested(NSMutableDictionary *dict, NSString *key, id val
 // When gOutputFull is NO and gOutputFields is nil, we apply the omit-when-default rules.
 // Omit-when-default rules (only relevant when --full is NOT set):
 //   allDay=false, completed=false, flagged=0, isOverdue=false,
-//   isRecurrent=false, priority=0, hashtags=[], view="list"
+//   isRecurrent=false, priority=0, hashtags=[]
 static id applyOutputShape(NSDictionary *src) {
     // --fields takes precedence over --full
     if (gOutputFields && gOutputFields.count > 0) {
