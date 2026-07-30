@@ -26,7 +26,6 @@ reminderkit move-group --name <name> --position <N>
 reminderkit move-list --name <list> --group <group> [--position <N>]
 reminderkit move-list --name <list> --remove-from-group
 reminderkit delete-group --name <name> [--keep-lists | --delete-lists]
-reminderkit set-list-view --name <list> --view <list|columns>
 reminderkit move-section --name <list> --section <section> --position <N>
 reminderkit list (<name> | --name <name>)
 reminderkit get (<title> | --title <title>) [--list <name>]
@@ -55,10 +54,6 @@ token-efficient shape:
 - **Group membership is explicit** on list objects as `group` (name),
   `groupId` (UUID), and `groupUri` (URL). `groups` returns an ordered `lists`
   array for each group.
-- **List view is exposed as `view`** with value `list` or `columns`.
-  The default `list` value is omitted unless requested with `--fields view`
-  or `--full`; `columns` is always emitted.
-
 Two flags shape the output further (accepted by any command that produces JSON):
 
 - `--fields id,title,notes` — emit ONLY the listed fields, in order.

@@ -31,19 +31,6 @@ ordered `lists` array. `reminderkit lists` adds `group`, `groupId`, and
 list between accounts is not supported. Deleting with `--delete-lists` also
 deletes reminders in those lists and must only be used when explicitly wanted.
 
-## List View
-
-Set a reminder list to Apple Reminders' List or Columns view:
-
-```bash
-reminderkit set-list-view --name <list-name> --view list
-reminderkit set-list-view --name <list-name> --view columns
-```
-
-`reminderkit lists --fields name,view` reads the effective view. The default
-is `list`; without `--fields` or `--full`, that default is omitted from JSON,
-while the non-default `columns` value is included.
-
 ## Sections
 
 Reorder a list's sections (the columns in Columns view) using a one-based

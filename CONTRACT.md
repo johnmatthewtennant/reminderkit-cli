@@ -28,12 +28,8 @@ contract, not on incidental output details.
 | `isRecurrent` | `false` | value is false |
 | `priority`    | `0`     | value is 0 |
 | `hashtags`    | `[]`    | array is empty |
-| `view`        | `"list"` | value is `"list"` |
-
   Non-default values are always included. Any nil/null optional field is
   already omitted (e.g. no `notes` key when the reminder has no notes).
-  List objects use `view: "columns"` for Columns view. Request `view`
-  explicitly with `--fields` or use `--full` to read the default `"list"`.
 
 ## `--fields <csv>` projection
 
