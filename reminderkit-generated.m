@@ -229,7 +229,7 @@ static void addFieldIfRequested(NSMutableDictionary *dict, NSString *key, id val
 // When gOutputFull is NO and gOutputFields is nil, we apply the omit-when-default rules.
 // Omit-when-default rules (only relevant when --full is NOT set):
 //   allDay=false, completed=false, flagged=0, isOverdue=false,
-//   isRecurrent=false, priority=0, hashtags=[], view="list"
+//   isRecurrent=false, priority=0, hashtags=[]
 static id applyOutputShape(NSDictionary *src) {
     // --fields takes precedence over --full
     if (gOutputFields && gOutputFields.count > 0) {
@@ -260,7 +260,6 @@ static id applyOutputShape(NSDictionary *src) {
     if ([out[@"priority"] isKindOfClass:[NSNumber class]] && [out[@"priority"] integerValue] == 0) [out removeObjectForKey:@"priority"];
     if ([out[@"flagged"] isKindOfClass:[NSNumber class]] && [out[@"flagged"] integerValue] == 0) [out removeObjectForKey:@"flagged"];
     if ([out[@"hashtags"] isKindOfClass:[NSArray class]] && [(NSArray *)out[@"hashtags"] count] == 0) [out removeObjectForKey:@"hashtags"];
-    if ([out[@"view"] isEqualToString:@"list"]) [out removeObjectForKey:@"view"];
     return out;
 }
 
@@ -460,34 +459,6 @@ static BOOL listIsGroup(id list) {
     return list && ((BOOL (*)(id, SEL))objc_msgSend)(list, sel_registerName("isGroup"));
 }
 
-// RemindersUICore persists each list's List/Columns selection in the shared
-// Reminders preferences suite. Its RemindersListLayoutKey is the ReminderKit
-// object ID's stringRepresentation with "Layout" appended, and its serialized
-// values are exactly "list" and "columns".
-static NSUserDefaults *remindersUIUserDefaults(void) {
-    static NSUserDefaults *defaults;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        defaults = [[NSUserDefaults alloc] initWithSuiteName:@"group.com.apple.reminders"];
-    });
-    return defaults;
-}
-
-static NSString *listViewPreferenceKey(id list) {
-    if (!list) return nil;
-    id objectID = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("objectID"));
-    NSString *representation = objectID
-        ? ((id (*)(id, SEL))objc_msgSend)(objectID, sel_registerName("stringRepresentation"))
-        : nil;
-    return representation ? [representation stringByAppendingString:@"Layout"] : nil;
-}
-
-static NSString *listView(id list) {
-    NSString *key = listViewPreferenceKey(list);
-    NSString *stored = key ? [remindersUIUserDefaults() stringForKey:key] : nil;
-    return [stored isEqualToString:@"columns"] ? @"columns" : @"list";
-}
-
 static NSArray *fetchLists(id store) {
     NSError *error = nil;
     NSArray *lists = ((id (*)(id, SEL, id*))objc_msgSend)(
@@ -573,7 +544,6 @@ static NSMutableDictionary *listIdentityDict(id list) {
 
 static NSMutableDictionary *listToDict(id list) {
     NSMutableDictionary *d = listIdentityDict(list);
-    d[@"view"] = listView(list);
     id group = ((id (*)(id, SEL))objc_msgSend)(list, sel_registerName("parentList"));
     if (group && listIsGroup(group)) {
         NSString *groupName = listName(group);
@@ -989,26 +959,6 @@ static int cmdLists(id store) {
         [result addObject:listToDict(list)];
     }
     printJSON(result);
-    return 0;
-}
-
-static int cmdSetListView(id store, NSString *listName, NSString *view) {
-    id list = findList(store, listName);
-    if (!list) errorExit([NSString stringWithFormat:@"List not found: %@", listName]);
-    if (![view isEqualToString:@"list"] && ![view isEqualToString:@"columns"]) {
-        errorExit(@"Invalid --view. Expected list or columns.");
-    }
-
-    NSString *key = listViewPreferenceKey(list);
-    if (!key) errorExit([NSString stringWithFormat:@"Could not determine view preference key for list: %@", listName]);
-    [remindersUIUserDefaults() setObject:view forKey:key];
-
-    NSString *readBack = [remindersUIUserDefaults() stringForKey:key];
-    if (![readBack isEqualToString:view]) {
-        errorExit([NSString stringWithFormat:@"Failed to persist view for list: %@", listName]);
-    }
-
-    printJSON(@{@"name": listName, @"view": readBack, @"updated": @YES});
     return 0;
 }
 
