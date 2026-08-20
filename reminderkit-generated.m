@@ -945,6 +945,7 @@ static NSMutableDictionary *reminderToDict(id rem) {
 
 static id findListByObjectID(id store, id targetObjID);
 static void sortRemindersByListOrdering(NSMutableArray *reminders, id list);
+static void promoteReminderToTopLevel(id store, id saveReq, id reminder, id reminderCI);
 static void reparentChangeItemAfter(id store, id saveReq, id listCI, id childCI, NSString *parentID, id afterSiblingCI);
 static void reparentChangeItemBefore(id store, id saveReq, id listCI, id childCI, NSString *parentID, id beforeSiblingCI);
 static NSMutableArray *fetchSortedSubtasks(id store, id parentRem);
@@ -1291,6 +1292,22 @@ static void sortRemindersByListOrdering(NSMutableArray *reminders, id list) {
         if (aIdx > bIdx) return NSOrderedDescending;
         return NSOrderedSame;
     }];
+}
+
+// Promote a child back into its list's top-level ordering. Removing only the
+// parent relationship also removes the reminder's list membership.
+static void promoteReminderToTopLevel(id store, id saveReq, id reminder, id reminderCI) {
+    id parentID = ((id (*)(id, SEL))objc_msgSend)(reminder, sel_registerName("parentReminderID"));
+    if (!parentID) return;
+
+    id reminderListID = ((id (*)(id, SEL))objc_msgSend)(reminder, sel_registerName("listID"));
+    id list = findListByObjectID(store, reminderListID);
+    if (!list) errorExit(@"Could not find list while removing parent");
+
+    id listCI = ((id (*)(id, SEL, id))objc_msgSend)(
+        saveReq, sel_registerName("updateList:"), list);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        listCI, sel_registerName("addReminderChangeItem:"), reminderCI);
 }
 
 // Shared helper: reparent a reminder change item under a parent (append to end).
@@ -1972,8 +1989,8 @@ static int cmdUpdate(id store, NSString *listName, NSDictionary *opts) {
         id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext"));
         ((void (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("removeURLAttachments"));
     }
-    if (opts[@"remove-parent"]) {
-        ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromParentReminder"));
+    if (removeParent) {
+        promoteReminderToTopLevel(store, saveReq, rem, changeItem);
     }
     if (opts[@"remove-from-list"]) {
         ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));

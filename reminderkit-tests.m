@@ -2162,6 +2162,87 @@ static int cmdTest(id store) {
         else { fprintf(stderr, "  FAIL (removed=%d)\n", removed); failed++; }
     }
 
+    // Regression: --remove-parent must promote a child into the same list,
+    // preserving its identity and membership. --remove-from-list remains a
+    // distinct operation that removes the reminder.
+    fprintf(stderr, "Test: cmdUpdate --remove-parent preserves reminder and list membership...\n");
+    {
+        NSString *detachParentTitle = @"__remcli_detach_parent__";
+        NSString *detachChildTitle = @"__remcli_detach_child__";
+        NSString *removeChildTitle = @"__remcli_remove_from_list_child__";
+        int rp = cmdAdd(store, detachParentTitle, testListName, @{});
+        id parent = findReminder(store, detachParentTitle, testListName);
+        NSString *parentID = parent ? objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(parent, sel_registerName("objectID"))) : nil;
+        int rc = parentID ? cmdAdd(store, detachChildTitle, nil, @{@"parent-id": parentID}) : -1;
+        int rr = parentID ? cmdAdd(store, removeChildTitle, nil, @{@"parent-id": parentID}) : -1;
+        id child = findReminder(store, detachChildTitle, testListName);
+        id removedChild = findReminder(store, removeChildTitle, testListName);
+        NSString *childID = child ? objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(child, sel_registerName("objectID"))) : nil;
+        NSString *originalListID = child ? objectIDToString(((id (*)(id, SEL))objc_msgSend)(child, sel_registerName("listID"))) : nil;
+        NSString *removedChildID = removedChild ? objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(removedChild, sel_registerName("objectID"))) : nil;
+        __block int ru = -1;
+        if (childID) captureStdout(^{ ru = cmdUpdate(store, nil, @{@"id": childID, @"remove-parent": @YES}); });
+        __block int rrl = -1;
+        if (removedChildID) captureStdout(^{ rrl = cmdUpdate(store, nil, @{@"id": removedChildID, @"remove-from-list": @YES}); });
+
+        id detached = childID ? findReminderByID(store, childID) : nil;
+        NSString *detachedID = detached ? objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(detached, sel_registerName("objectID"))) : nil;
+        NSString *detachedListID = detached ? objectIDToString(((id (*)(id, SEL))objc_msgSend)(detached, sel_registerName("listID"))) : nil;
+        id detachedParentID = detached ? ((id (*)(id, SEL))objc_msgSend)(detached, sel_registerName("parentReminderID")) : nil;
+        BOOL removedFromList = removedChildID && !findReminderByID(store, removedChildID);
+        BOOL ok = rp == 0 && rc == 0 && rr == 0 && ru == 0 && rrl == 0
+            && detached && [detachedID isEqualToString:childID]
+            && [detachedListID isEqualToString:originalListID]
+            && !detachedParentID && removedFromList;
+        if (ok) { fprintf(stderr, "  PASS\n"); passed++; }
+        else {
+            fprintf(stderr, "  FAIL (rp=%d rc=%d rr=%d ru=%d rrl=%d preserved=%d sameList=%d topLevel=%d removeFromList=%d)\n",
+                rp, rc, rr, ru, rrl, detached != nil,
+                detachedListID && [detachedListID isEqualToString:originalListID],
+                detached && !detachedParentID, removedFromList);
+            failed++;
+        }
+        if (detached) cmdDelete(store, childID);
+        id removeControl = removedChildID ? findReminderByID(store, removedChildID) : nil;
+        if (removeControl) cmdDelete(store, removedChildID);
+        if (parent) cmdDelete(store, parentID);
+    }
+
+    fprintf(stderr, "Test: batch update remove-parent preserves reminder and list membership...\n");
+    {
+        NSString *detachParentTitle = @"__remcli_batch_detach_parent__";
+        NSString *detachChildTitle = @"__remcli_batch_detach_child__";
+        int rp = cmdAdd(store, detachParentTitle, testListName, @{});
+        id parent = findReminder(store, detachParentTitle, testListName);
+        NSString *parentID = parent ? objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(parent, sel_registerName("objectID"))) : nil;
+        int rc = parentID ? cmdAdd(store, detachChildTitle, nil, @{@"parent-id": parentID}) : -1;
+        id child = findReminder(store, detachChildTitle, testListName);
+        NSString *childID = child ? objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(child, sel_registerName("objectID"))) : nil;
+        NSString *originalListID = child ? objectIDToString(((id (*)(id, SEL))objc_msgSend)(child, sel_registerName("listID"))) : nil;
+        NSString *batchJSON = childID ? [NSString stringWithFormat:@"[{\"op\":\"update\",\"id\":\"%@\",\"remove-parent\":true}]", childID] : @"[]";
+        __block int rb = -1;
+        if (childID) captureStdoutWithStdin(batchJSON, ^{ rb = cmdBatch(store); });
+
+        id detached = childID ? findReminderByID(store, childID) : nil;
+        NSString *detachedID = detached ? objectIDToUUID(((id (*)(id, SEL))objc_msgSend)(detached, sel_registerName("objectID"))) : nil;
+        NSString *detachedListID = detached ? objectIDToString(((id (*)(id, SEL))objc_msgSend)(detached, sel_registerName("listID"))) : nil;
+        id detachedParentID = detached ? ((id (*)(id, SEL))objc_msgSend)(detached, sel_registerName("parentReminderID")) : nil;
+        BOOL ok = rp == 0 && rc == 0 && rb == 0
+            && detached && [detachedID isEqualToString:childID]
+            && [detachedListID isEqualToString:originalListID]
+            && !detachedParentID;
+        if (ok) { fprintf(stderr, "  PASS\n"); passed++; }
+        else {
+            fprintf(stderr, "  FAIL (rp=%d rc=%d rb=%d preserved=%d sameList=%d topLevel=%d)\n",
+                rp, rc, rb, detached != nil,
+                detachedListID && [detachedListID isEqualToString:originalListID],
+                detached && !detachedParentID);
+            failed++;
+        }
+        if (detached) cmdDelete(store, childID);
+        if (parent) cmdDelete(store, parentID);
+    }
+
     // Cleanup
     // Test 47: cmdDelete child
     fprintf(stderr, "Test 47: cmdDelete child...\n");

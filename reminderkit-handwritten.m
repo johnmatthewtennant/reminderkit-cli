@@ -517,7 +517,7 @@ static int cmdBatch(id store) {
                     id attCtx = ((id (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("attachmentContext"));
                     ((void (*)(id, SEL))objc_msgSend)(attCtx, sel_registerName("removeURLAttachments"));
                 }
-                if (op[@"remove-parent"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromParentReminder"));
+                if (op[@"remove-parent"]) promoteReminderToTopLevel(store, saveReq, rem, changeItem);
                 if (op[@"remove-from-list"]) ((void (*)(id, SEL))objc_msgSend)(changeItem, sel_registerName("removeFromList"));
 
                 // Reparent/reorder: parent-id, after-id, or position
